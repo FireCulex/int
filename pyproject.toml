@@ -63,6 +63,7 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers --cov=int --cov-report=term-missing --cov-fail-under=80"
 markers = [
     "live: opt-in tests that hit the real Gemini API (skipped by default; run with --run-live)",
+    "e2e: end-to-end tests that drive a real MCP client over HTTP against a live uvicorn server (always run in CI; the real-Qdrant variant skips cleanly when Qdrant is unreachable)",
 ]
 
 [tool.coverage.run]
