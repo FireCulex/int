@@ -127,9 +127,7 @@ class QdrantStore:
         self.ensure_collection()
         vec = list(embedding)
         if len(vec) != self._dim:
-            raise StoreError(
-                f"embedding dim {len(vec)} != collection dim {self._dim}"
-            )
+            raise StoreError(f"embedding dim {len(vec)} != collection dim {self._dim}")
         try:
             self._client.upsert(
                 collection_name=self._collection,
@@ -224,9 +222,7 @@ class QdrantStore:
         self.ensure_collection()
         vec = list(query_vector)
         if len(vec) != self._dim:
-            raise StoreError(
-                f"query_vector dim {len(vec)} != collection dim {self._dim}"
-            )
+            raise StoreError(f"query_vector dim {len(vec)} != collection dim {self._dim}")
         if all(v == 0.0 for v in vec):
             raise EmbeddingError("zero-vector query yields no signal")
 

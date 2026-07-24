@@ -68,3 +68,8 @@ markers = [
 [tool.coverage.run]
 source = ["int"]
 omit = ["tests/*", "int_cli/*"]
+
+[dependency-groups]
+dev = [
+    "asgi-lifespan>=2.1.0",
+]

@@ -45,9 +45,7 @@ class FakeCollection:
 
     def upsert(self, point: FakePoint) -> None:
         if len(point.vector) != self.dim:
-            raise ValueError(
-                f"vector dim {len(point.vector)} != collection dim {self.dim}"
-            )
+            raise ValueError(f"vector dim {len(point.vector)} != collection dim {self.dim}")
         self.points[point.id] = point
 
     def delete(self, point_id: uuid.UUID) -> bool:
@@ -80,9 +78,7 @@ class FakeQdrantClient:
         collection_name: str,
         vectors_config: Any,
     ) -> None:
-        self.calls.append(
-            ("create_collection", {"collection_name": collection_name})
-        )
+        self.calls.append(("create_collection", {"collection_name": collection_name}))
         dim = vectors_config.params.size
         self.collections[collection_name] = FakeCollection(dim=dim)
 
@@ -90,9 +86,7 @@ class FakeQdrantClient:
         return name in self.collections
 
     def upsert(self, *, collection_name: str, points: list[dict[str, Any]]) -> None:
-        self.calls.append(
-            ("upsert", {"collection_name": collection_name, "n_points": len(points)})
-        )
+        self.calls.append(("upsert", {"collection_name": collection_name, "n_points": len(points)}))
         coll = self.collections[collection_name]
         for p in points:
             coll.upsert(

@@ -84,9 +84,7 @@ def _require_str(value: Any, *, field: str) -> str:
     return value
 
 
-def _require_int_in_range(
-    value: Any, *, field: str, minimum: int, default: int
-) -> int:
+def _require_int_in_range(value: Any, *, field: str, minimum: int, default: int) -> int:
     if value is None:
         return default
     if not isinstance(value, int) or isinstance(value, bool):

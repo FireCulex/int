@@ -22,7 +22,7 @@ from int.models import EmbeddingError
 
 
 class _EmbedContentLike(Protocol):
-    async def __call__(
+    def __call__(
         self,
         *,
         model: str,
@@ -36,7 +36,8 @@ class _ModelsLike(Protocol):
 
 
 class _ClientLike(Protocol):
-    models: _ModelsLike
+    @property
+    def models(self) -> Any: ...
 
 
 class Embedder:
@@ -105,9 +106,7 @@ class Embedder:
             raise EmbeddingError("empty embedding vector")
         n = float(np.linalg.norm(v))
         if n == 0.0:
-            raise EmbeddingError(
-                f"zero-norm embedding returned for content (len={len(content)})"
-            )
+            raise EmbeddingError(f"zero-norm embedding returned for content (len={len(content)})")
         normalized: list[float] = (v / n).tolist()
         return normalized
 

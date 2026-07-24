@@ -108,9 +108,7 @@ def test_search_project_a_returns_zero_from_project_b(
     store.add(ma, a_vec)
     store.add(mb, b_vec)
 
-    q_vec = fake_embedder.embed_query_sync(
-        "what framework does the python service use?"
-    )
+    q_vec = fake_embedder.embed_query_sync("what framework does the python service use?")
     results = store.search("pianoweb", query_vector=q_vec, limit=10)
     assert all(r.id != mb.id for r in results), "cross-project leak detected"
 
@@ -142,9 +140,7 @@ def test_every_stored_vector_is_l2_normalized(
     client = QdrantClient(host=host, port=port)
     pts, _ = client.scroll(
         collection_name="int_memories",
-        scroll_filter={
-            "must": [{"key": "project", "match": {"value": "normtest"}}]
-        },
+        scroll_filter={"must": [{"key": "project", "match": {"value": "normtest"}}]},
         limit=100,
         with_payload=False,
         with_vectors=True,

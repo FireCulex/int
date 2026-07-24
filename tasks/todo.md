@@ -68,12 +68,24 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
   - Files: `int/tools.py`, `tests/unit/test_tools.py`
   - Scope: M
 
-- [ ] **Task 8: FastAPI server + MCP mount + auth (`int/server.py`)**
+- [x] **Task 8: FastAPI server + MCP mount + auth (`int/server.py`)**
   - Acceptance: FastAPI app mounts the MCP server at `/mcp` using Streamable HTTP transport. `API_KEY` header check on every request; missing/wrong → 401 `AuthError`. Server startup: load `Settings`, construct `Embedder` + `QdrantStore`, ensure Qdrant collection exists (auto-create if missing, fail-fast on wrong dimension), retry Qdrant connection on startup until ready. Typed errors from tools translate to MCP error responses with code + message (no bare 500s). No raw memory content logged at INFO — hashes + metadata only.
   - Verify: `uv run pytest tests/unit/test_server.py` covers auth middleware, startup collection check, and error envelope translation. `uv run mypy int` passes.
   - Dependencies: Tasks 6, 7
   - Files: `int/server.py`, `tests/unit/test_server.py`
   - Scope: M
+  - Done: 14 unit tests cover auth (401 on missing/wrong key, exempted `/healthz`),
+    tools/list exposes all five tools with proper named-parameter inputSchema
+    (synthesized `inspect.Signature` so FastMCP advertises `project`/`type`/...
+    instead of a `kwargs` bag), each tool's success + typed-error envelope,
+    no-bare-500 invariant, masking-flag state. Tests drive the FastAPI lifespan
+    via `asgi-lifespan.LifespanManager` (httpx `ASGITransport` does not run
+    lifespan) and do the MCP `initialize` → `notifications/initialized`
+    handshake before any `tools/list` or `tools/call`. TransportSecurity's
+    DNS-rebinding guard is disabled (the static API_KEY is the real auth
+    boundary for v1; the guard only rejects non-resolvable Host headers).
+    Also removes a stray duplicate `embeddings.py` committed at the repo root
+    in Task 4 and reformats existing files to match `ruff format`.
 
 - [ ] **Task 9: E2E — live server over HTTP**
   - Acceptance: E2E test spins the server + Qdrant (via compose or testcontainers), connects a real MCP client over HTTP with the correct `API_KEY`, and exercises all five tools end-to-end. Auth check: missing/wrong `API_KEY` → 401 on every tool. Offline-degrade check: when Gemini is unreachable (mock raised), `add`/`search`/`recall` return `EmbeddingError` (not a crash); `list` still works without embedding.

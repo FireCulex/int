@@ -118,12 +118,23 @@ def qdrant_container() -> Any:
     # Stop any stale probe from a prior aborted run before starting a new one.
     subprocess.run(
         ["docker", "stop", "int_qdrant_probe"],
-        capture_output=True, text=True, timeout=20,
+        capture_output=True,
+        text=True,
+        timeout=20,
     )
 
     probe = subprocess.run(
-        ["docker", "run", "--rm", "-d", "--name", "int_qdrant_probe",
-         "-p", "6333:6333", "qdrant/qdrant:latest"],
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-d",
+            "--name",
+            "int_qdrant_probe",
+            "-p",
+            "6333:6333",
+            "qdrant/qdrant:latest",
+        ],
         capture_output=True,
         text=True,
         timeout=30,
@@ -137,8 +148,7 @@ def qdrant_container() -> Any:
         ready = False
         while time.monotonic() < deadline:
             check = subprocess.run(
-                ["curl", "-fsS", "--max-time", "2",
-                 "http://127.0.0.1:6333/healthz"],
+                ["curl", "-fsS", "--max-time", "2", "http://127.0.0.1:6333/healthz"],
                 capture_output=True,
                 text=True,
             )
@@ -172,12 +182,16 @@ def qdrant_container() -> Any:
             def stop() -> None:
                 subprocess.run(
                     ["docker", "stop", "int_qdrant_probe"],
-                    capture_output=True, text=True, timeout=20,
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
                 )
 
         yield _Container()
     finally:
         subprocess.run(
             ["docker", "stop", "int_qdrant_probe"],
-            capture_output=True, text=True, timeout=20,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )

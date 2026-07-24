@@ -56,12 +56,8 @@ class FakeStore:
         from int.models import SearchResult
 
         return [
-            SearchResult(
-                id=uuid.uuid4(), type="architecture", content="canned", score=0.9
-            ),
-            SearchResult(
-                id=uuid.uuid4(), type="command", content="canned2", score=0.5
-            ),
+            SearchResult(id=uuid.uuid4(), type="architecture", content="canned", score=0.9),
+            SearchResult(id=uuid.uuid4(), type="command", content="canned2", score=0.5),
         ][:limit]
 
     def recall(
@@ -147,11 +143,14 @@ async def test_add_calls_embedder_with_retrieval_document_and_stores_memory() ->
     from int.models import Memory
 
     tools, store, embedder = _make_tools()
-    mid = await tools.call("int.add", {
-        "project": "pianoweb",
-        "type": "architecture",
-        "content": "flask backend",
-    })
+    mid = await tools.call(
+        "int.add",
+        {
+            "project": "pianoweb",
+            "type": "architecture",
+            "content": "flask backend",
+        },
+    )
     assert isinstance(mid, str)
     assert uuid.UUID(mid)
     assert embedder.doc_calls == ["flask backend"]
