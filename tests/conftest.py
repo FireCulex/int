@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Any
 
 import numpy as np
 import pytest
@@ -56,6 +57,16 @@ class FakeEmbedder:
         self.calls.append(("query", content))
         return self._vec(content, salt="qry")
 
+    def embed_document_sync(self, content: str) -> list[float]:
+        v = self._vec(content, salt="doc")
+        self.calls.append(("document", content))
+        return v
+
+    def embed_query_sync(self, content: str) -> list[float]:
+        v = self._vec(content, salt="qry")
+        self.calls.append(("query", content))
+        return v
+
     def _vec(self, content: str, salt: str) -> list[float]:
         seed = hashlib.sha256((salt + "|" + content).encode()).digest()
         bytes_needed = self.dim * 4
@@ -76,3 +87,97 @@ class FakeEmbedder:
 @pytest.fixture
 def fake_embedder() -> FakeEmbedder:
     return FakeEmbedder(dim=768)
+
+
+# ---------------------------------------------------------------- Qdrant fixture
+
+
+@pytest.fixture(scope="session")
+def qdrant_container() -> Any:
+    """Session-scoped Qdrant container for integration tests.
+
+    Uses direct `docker run` + `curl /healthz` polling (rather than
+    testcontainers' Ryuk bridge) for portability across sandboxed Docker setups.
+
+    Skipped cleanly (so the gate stays green) when:
+    - docker / curl CLI is missing
+    - the container fails to start
+    - curl reaches /healthz but Python can't open a socket (some sandboxed
+      environments intercept loopback traffic for non-shell processes).
+    """
+    import shutil
+    import socket
+    import subprocess
+    import time
+
+    if shutil.which("docker") is None:
+        pytest.skip("docker CLI not available")
+    if shutil.which("curl") is None:
+        pytest.skip("curl not available")
+
+    # Stop any stale probe from a prior aborted run before starting a new one.
+    subprocess.run(
+        ["docker", "stop", "int_qdrant_probe"],
+        capture_output=True, text=True, timeout=20,
+    )
+
+    probe = subprocess.run(
+        ["docker", "run", "--rm", "-d", "--name", "int_qdrant_probe",
+         "-p", "6333:6333", "qdrant/qdrant:latest"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if probe.returncode != 0:
+        pytest.skip(f"docker run failed: {probe.stderr.strip()}")
+
+    try:
+        # Wait (up to 30s) for curl /healthz to return 200.
+        deadline = time.monotonic() + 30.0
+        ready = False
+        while time.monotonic() < deadline:
+            check = subprocess.run(
+                ["curl", "-fsS", "--max-time", "2",
+                 "http://127.0.0.1:6333/healthz"],
+                capture_output=True,
+                text=True,
+            )
+            if check.returncode == 0:
+                ready = True
+                break
+            time.sleep(0.5)
+
+        if not ready:
+            pytest.skip("qdrant never reached healthz in 30s")
+
+        # Some sandboxes routing loopback traffic intercept curl but block
+        # other processes. Verify Python itself can open a socket to Qdrant
+        # before handing the container to tests.
+        try:
+            sock = socket.create_connection(("127.0.0.1", 6333), timeout=5)
+            sock.close()
+        except (TimeoutError, OSError) as e:
+            pytest.skip(f"qdrant up via curl but unreachable from Python: {e}")
+
+        class _Container:
+            @staticmethod
+            def host_ip() -> str:
+                return "127.0.0.1"
+
+            @staticmethod
+            def rest_port() -> int:
+                return 6333
+
+            @staticmethod
+            def stop() -> None:
+                subprocess.run(
+                    ["docker", "stop", "int_qdrant_probe"],
+                    capture_output=True, text=True, timeout=20,
+                )
+
+        yield _Container()
+    finally:
+        subprocess.run(
+            ["docker", "stop", "int_qdrant_probe"],
+            capture_output=True, text=True, timeout=20,
+        )
