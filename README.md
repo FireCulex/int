@@ -39,7 +39,7 @@ See `docs/deployment.md` for full setup, CLI usage, and common pitfalls.
 | `int.delete` | `memory_id` | `deleted: bool` |
 | `int.search` | `project`, `query`, `limit=5` | ranked `SearchResult[]` |
 | `int.list` | `project` | metadata-only `Memory[]` |
-| `int.recall` | `project`, `query`, `limit=5` | ranked `SearchResult[]` |
+| `int.read` | `project`, `query`, `limit=5` | ranked `SearchResult[]` |
 
 ## Stack
 

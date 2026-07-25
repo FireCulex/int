@@ -9,7 +9,7 @@ transport as any MCP client (including OpenCode). It performs the
     delete(memory_id)                    -> "true" | "false"
     search(project, query, limit=5)      -> list[SearchResult dict]
     list(project)                        -> list[MemoryMetadata dict]
-    recall(project, query, limit=5)       -> list[SearchResult dict]
+    read(project, query, limit=5)        -> list[SearchResult dict]
 
 This module owns the only place where the underlying MCP SDK is used by the
 CLI, so command functions in `main.py` can stay declarative and the seam is
@@ -222,19 +222,19 @@ async def call_search(
     return _parse_items(text)
 
 
-async def call_recall(
+async def call_read(
     session: Any,
     *,
     project: str,
     query: str,
     limit: int = 5,
 ) -> list[dict[str, Any]]:
-    """Issue `int.recall` (v1 pass-through to `int.search`)."""
+    """Issue `int.read` (v1 pass-through to `int.search`)."""
     out = await session.call_tool(
-        "int.recall",
+        "int.read",
         arguments={"project": project, "query": query, "limit": limit},
     )
-    text = _require_ok(out, "recall")
+    text = _require_ok(out, "read")
     return _parse_items(text)
 
 
@@ -279,7 +279,7 @@ __all__ = [
     "call_add",
     "call_delete",
     "call_list",
-    "call_recall",
+    "call_read",
     "call_search",
     "resolve_config",
     "session",

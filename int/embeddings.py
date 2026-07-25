@@ -9,6 +9,12 @@ The single place where:
 Callers (tools, store, CLI) never specify task_type or normalization — both are
 baked into this wrapper. Swap to a local embedder in v2 by replacing this
 module's internals; the public surface stays the same.
+
+The `client` passed to `Embedder` must expose an async `models.embed_content`
+coroutine. For google-genai 2.x that means `Client(api_key=...).aio` (the
+async sub-client), *not* the top-level `Client` — `Client.models.embed_content`
+is synchronous and awaiting its return value raises
+`'EmbedContentResponse' object can't be awaited`.
 """
 
 from __future__ import annotations
@@ -65,7 +71,7 @@ class Embedder:
         return await self._embed(content, task_type="RETRIEVAL_DOCUMENT")
 
     async def embed_query(self, content: str) -> list[float]:
-        """For `int.search` / `int.recall`. task_type=RETRIEVAL_QUERY."""
+        """For `int.search` / `int.read`. task_type=RETRIEVAL_QUERY."""
         return await self._embed(content, task_type="RETRIEVAL_QUERY")
 
     async def _embed(self, content: str, *, task_type: str) -> list[float]:

@@ -53,7 +53,7 @@ class FakeStore:
             SearchResult(id=uuid4(), type="architecture", content="canned", score=0.9),
         ][:limit]
 
-    def recall(self, project: str, *, query_vector: list[float], limit: int = 5) -> list[Any]:
+    def read(self, project: str, *, query_vector: list[float], limit: int = 5) -> list[Any]:
         return self.search(project, query_vector=query_vector, limit=limit)
 
     def list(self, project: str) -> list[Any]:  # noqa: A003
@@ -237,7 +237,7 @@ async def test_tools_exposed_at_mcp_endpoint_with_correct_names(
         "int.delete",
         "int.search",
         "int.list",
-        "int.recall",
+        "int.read",
     }
 
 
@@ -347,18 +347,18 @@ async def test_delete_malformed_uuid_returns_typed_error(
     assert "uuid" in body["result"]["content"][0]["text"].lower()
 
 
-# --- int.search / int.list / int.recall ---
+# --- int.search / int.list / int.read ---
 
 
 @pytest.mark.asyncio
-async def test_search_tool_returns_results(client: AsyncClient) -> None:
+async def test_read_tool_passes_through(client: AsyncClient) -> None:
     await _init_session(client)
     body = await _call(
         client,
         id_=1,
         method="tools/call",
         params={
-            "name": "int.search",
+            "name": "int.read",
             "arguments": {"project": "p", "query": "q"},
         },
     )
@@ -373,21 +373,6 @@ async def test_list_tool_returns_metadata(client: AsyncClient) -> None:
         id_=1,
         method="tools/call",
         params={"name": "int.list", "arguments": {"project": "p"}},
-    )
-    assert body["result"]["isError"] is False, body
-
-
-@pytest.mark.asyncio
-async def test_recall_tool_passes_through(client: AsyncClient) -> None:
-    await _init_session(client)
-    body = await _call(
-        client,
-        id_=1,
-        method="tools/call",
-        params={
-            "name": "int.recall",
-            "arguments": {"project": "p", "query": "q"},
-        },
     )
     assert body["result"]["isError"] is False, body
 

@@ -53,6 +53,9 @@ class FakeModels:
 class FakeGenaiClient:
     def __init__(self, values: list[float]) -> None:
         self.models = FakeModels(values)
+        # Mirror google-genai's Client.aio: production passes `genai_client.aio`
+        # to the Embedder, so the fake must also resolve via `.aio.models`.
+        self.aio = self
 
 
 def _config_task_type(fake_embedder: Any) -> str | None:

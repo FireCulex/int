@@ -2,7 +2,7 @@
 
 Covers:
 - argument parsing for each of the five commands (`add`/`delete`/`search`/
-  `list`/`recall`) via Typer's CliRunner
+  `list`/`read`) via Typer's CliRunner
 - env-driven config (`API_KEY`, `INT_SERVER_URL`) and the CLI's exit-code
   categories:
     CliConfigError      -> 2 (missing API_KEY)
@@ -321,7 +321,7 @@ def test_list_prints_metadata_without_content(
     assert sess.calls == [("int.list", {"project": "p"})]
 
 
-def test_recall_calls_int_recall_pass_through(
+def test_read_calls_int_read_pass_through(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     items = [
@@ -332,19 +332,19 @@ def test_recall_calls_int_recall_pass_through(
             "score": 0.88,
         }
     ]
-    sess = _FakeSession(responses={"int.recall": _CallResult(text=json.dumps({"items": items}))})
+    sess = _FakeSession(responses={"int.read": _CallResult(text=json.dumps({"items": items}))})
     _patch_session_with(monkeypatch, sess)
     monkeypatch.setenv("API_KEY", "k")
 
     from int_cli.main import app
 
     result = runner.invoke(
-        app, ["recall", "--project", "int", "--query", "what to do before commit"]
+        app, ["read", "--project", "int", "--query", "what to do before commit"]
     )
     assert result.exit_code == 0, result.stderr
     assert "score=0.8800" in result.stdout
     assert sess.calls == [
-        ("int.recall", {"project": "int", "query": "what to do before commit", "limit": 5})
+        ("int.read", {"project": "int", "query": "what to do before commit", "limit": 5})
     ]
 
 

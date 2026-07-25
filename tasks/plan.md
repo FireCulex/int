@@ -2,7 +2,7 @@
 
 ## Overview
 
-Build a self-hosted, Dockerized, open-source AI memory system. A FastAPI MCP server backed by Qdrant, embedding via the Gemini API (`gemini-embedding-001`), exposed as five project-scoped tools (`add`/`delete`/`search`/`list`/`recall`) callable from OpenCode. v1 is single-tenant, no TLS, static-key auth.
+Build a self-hosted, Dockerized, open-source AI memory system. A FastAPI MCP server backed by Qdrant, embedding via the Gemini API (`gemini-embedding-001`), exposed as five project-scoped tools (`add`/`delete`/`search`/`list`/`read`) callable from OpenCode. v1 is single-tenant, no TLS, static-key auth.
 
 ## Architecture Decisions
 
@@ -30,7 +30,7 @@ Build a self-hosted, Dockerized, open-source AI memory system. A FastAPI MCP ser
 ### Phase 2: Embedder + Store (the vertical slice: store a memory, search it back)
 
 - [ ] Task 4: Gemini embedder wrapper (`int/embeddings.py`) — task_type baked in, L2-normalize
-- [ ] Task 5: Qdrant store (`int/store.py`) — `add`, `delete`, `search`, `list`, `recall`
+- [ ] Task 5: Qdrant store (`int/store.py`) — `add`, `delete`, `search`, `list`, `read`
 - [ ] Task 6: Embedder + store integration test against real Qdrant (mocked Gemini)
 
 ### Checkpoint: Embedder + Store

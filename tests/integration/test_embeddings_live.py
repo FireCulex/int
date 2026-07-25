@@ -29,7 +29,11 @@ def _live_client() -> object:
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         pytest.skip("GEMINI_API_KEY not set in env; cannot run live test")
-    return genai.Client(api_key=key)
+    # The Embedder awaits the call, so it needs the async sub-client
+    # (`Client.aio`, whose `models.embed_content` is a real coroutine).
+    # The sync `Client.models.embed_content` returns the response directly
+    # and awaiting it raises "'EmbedContentResponse' object can't be awaited".
+    return genai.Client(api_key=key).aio
 
 
 def _live_settings() -> tuple[object, str, int]:

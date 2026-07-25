@@ -64,7 +64,7 @@ export API_KEY="<the same value you set in .env>"
 
 Restart OpenCode (or run `opencode mcp list`) and you should see all five
 `int.*` tools (`int.add`, `int.delete`, `int.search`, `int.list`,
-`int.recall`) available to the agent. The repo's `AGENTS.md` already carries
+`int.read`) available to the agent. The repo's `AGENTS.md` already carries
 the "search memory first" policy, so the agent will call `int.search` before
 re-running expensive discovery work in this project.
 
@@ -104,9 +104,9 @@ uv run int-cli list --project myproj
 # Delete by UUID (idempotent — prints 'false' if the id no longer exists)
 uv run int-cli delete --memory-id 550e8400-e29b-41d4-a716-446655440000
 
-# recall is a thin pass-through to search in v1 (reserved for future
-# summary+recall behavior)
-uv run int-cli recall --project myproj --query "tech stack"
+# read is a thin pass-through to search in v1 (reserved for future
+# summary+read behavior)
+uv run int-cli read --project myproj --query "tech stack"
 ```
 
 CLI flags override env if you need to talk to a different server or use a
@@ -211,7 +211,7 @@ start.
 
 If `GEMINI_API_KEY` is missing/wrong, the Gemini API is rate-limiting, or
 the network can't reach `generativelanguage.googleapis.com`, the three
-operations that need embeddings (`add`, `search`, `recall`) all return a
+operations that need embeddings (`add`, `search`, `read`) all return a
 typed `EmbeddingError` envelope. They do not crash the server.
 
 Crucially, `list` doesn't need an embedding call — it just lists Qdrant

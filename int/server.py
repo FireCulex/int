@@ -95,9 +95,13 @@ def _default_real_deps(
     )
     store.ensure_collection()
 
+    # google-genai's `Client.models.embed_content` is *synchronous*; the
+    # async coroutine lives on `Client.aio.models.embed_content`. The Embedder
+    # awaits the call, so we hand it the async sub-client. (Awaiting the sync
+    # response raises "'EmbedContentResponse' object can't be awaited".)
     genai_client = genai.Client(api_key=gemini_api_key)
     embedder = Embedder(
-        client=genai_client,
+        client=genai_client.aio,
         model=gemini_embedding_model,
         dimension=gemini_embedding_dimensions,
     )

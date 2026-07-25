@@ -6,7 +6,7 @@ No network. Verifies:
 - delete(uuid) returns True if existed, False if missing (idempotent)
 - search(project, query_vec, limit) returns scored hits filtered by project
 - list(project) returns MemoryMetadata (no content, no embedding call)
-- recall(project, query_vec, limit) mirrors search (thin pass-through in v1)
+- read(project, query_vec, limit) mirrors search (thin pass-through in v1)
 - project scoping: search A returns nothing from B
 - collection auto-creates on first use with the configured dimension
 - startup assert: existing collection with wrong dimension -> StoreError fail-fast
@@ -17,6 +17,7 @@ No network. Verifies:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -116,6 +117,41 @@ class FakeQdrantClient:
                 deleted = True
         return deleted
 
+    def retrieve(
+        self,
+        *,
+        collection_name: str,
+        ids: Sequence[Any],
+        with_payload: bool = True,
+        with_vectors: bool = False,
+    ) -> list[Any]:
+        # Mirrors real Qdrant's retrieve: returns the points that exist (empty
+        # list if none match). Used by QdrantStore.delete to probe before
+        # issuing a no-op delete, so the store can return False for missing
+        # ids (idempotent semantics) instead of Qdrant's always-truthy ack.
+        self.calls.append(
+            (
+                "retrieve",
+                {
+                    "collection_name": collection_name,
+                    "ids": list(ids),
+                    "with_payload": with_payload,
+                    "with_vectors": with_vectors,
+                },
+            )
+        )
+        coll = self.collections[collection_name]
+        out: list[Any] = []
+        for pid in ids:
+            p = coll.points.get(pid)
+            if p is None:
+                continue
+            attrs: dict[str, Any] = {"id": p.id, "payload": dict(p.payload)}
+            if with_vectors:
+                attrs["vector"] = list(p.vector)
+            out.append(type("Point", (), attrs)())
+        return out
+
     def scroll(
         self,
         *,
@@ -154,7 +190,7 @@ class FakeQdrantClient:
             if with_vectors:
                 attrs["vector"] = list(p.vector)
             _point_cls = type("Point", (), attrs)
-            items.append((_point_cls(), None))
+            items.append(_point_cls())
         return (items, None)
 
 
@@ -325,21 +361,36 @@ def test_list_filters_by_project() -> None:
 def test_delete_existing_returns_true() -> None:
     from int.models import Memory
 
-    store, _ = _make_store(dim=4)
+    store, client = _make_store(dim=4)
     m = Memory(project="p", type="t", content="x")
     store.add(m, [1.0, 0.0, 0.0, 0.0])
+    client.calls.clear()
     assert store.delete(m.id) is True
+    # Idempotent semantics now require a retrieve probe before delete, so we
+    # assert the probe happened and a delete was issued for an existing id.
+    call_names = tuple(c[0] for c in client.calls)
+    assert "retrieve" in call_names
+    assert "delete" in call_names
 
 
 def test_delete_missing_returns_false_idempotent() -> None:
-    store, _ = _make_store(dim=4)
+    store, client = _make_store(dim=4)
     missing = uuid.uuid4()
+    client.calls.clear()
     assert store.delete(missing) is False
+    # A missing id must be probed via retrieve and NOT result in a no-op
+    # delete call -- real Qdrant's delete acks unconditionally and would
+    # otherwise mask the "nothing was there" case.
+    call_names = tuple(c[0] for c in client.calls)
+    assert "retrieve" in call_names
+    assert "delete" not in call_names
     # Calling again on the same missing id should still be False, not raise.
+    client.calls.clear()
     assert store.delete(missing) is False
+    assert "delete" not in tuple(c[0] for c in client.calls)
 
 
-def test_recall_mirrors_search_in_v1() -> None:
+def test_read_mirrors_search_in_v1() -> None:
     from int.models import Memory
 
     store, _ = _make_store(dim=4)
@@ -352,9 +403,9 @@ def test_recall_mirrors_search_in_v1() -> None:
         [0.0, 0.0, 0.0, 1.0],
     )
     search_results = store.search("p", query_vector=[1.0, 0.0, 0.0, 0.0], limit=5)
-    recall_results = store.recall("p", query_vector=[1.0, 0.0, 0.0, 0.0], limit=5)
-    assert [r.id for r in search_results] == [r.id for r in recall_results]
-    assert [r.score for r in search_results] == [r.score for r in recall_results]
+    read_results = store.read("p", query_vector=[1.0, 0.0, 0.0, 0.0], limit=5)
+    assert [r.id for r in search_results] == [r.id for r in read_results]
+    assert [r.score for r in search_results] == [r.score for r in read_results]
 
 
 def test_dimension_mismatch_on_existing_collection_raises_store_error() -> None:

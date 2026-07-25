@@ -6,7 +6,7 @@ Five commands, matching the MCP tool surface 1:1:
     int-cli delete     --memory-id <uuid>
     int-cli search     --project <p> --query <q>         [--limit <n>]
     int-cli list       --project <p>
-    int-cli recall     --project <p> --query <q>         [--limit <n>]
+    int-cli read      --project <p> --query <q>         [--limit <n>]
 
 Each command talks to the server over the MCP Streamable HTTP transport and
 sends the same `API_KEY` header as any MCP client. Auth failures exit 3;
@@ -36,7 +36,7 @@ from int_cli.client import (
     call_add,
     call_delete,
     call_list,
-    call_recall,
+    call_read,
     call_search,
     session,
 )
@@ -169,9 +169,9 @@ def list_cmd(
     _run(_go())
 
 
-@app.command(help="Recall memories from a project by semantic query. v1 pass-through to search.")
-def recall(
-    project: Annotated[str, typer.Option("--project", help="Project to recall.")],
+@app.command(help="Read memories from a project by semantic query. v1 pass-through to search.")
+def read(
+    project: Annotated[str, typer.Option("--project", help="Project to read.")],
     query: Annotated[str, typer.Option("--query", help="Semantic query.")],
     limit: Annotated[int, typer.Option("--limit", help="Max results (default 5).")] = 5,
     server_url: Annotated[
@@ -179,11 +179,11 @@ def recall(
     ] = None,
     api_key: Annotated[str | None, typer.Option("--api-key", help="Overrides API_KEY.")] = None,
 ) -> None:
-    """Recall memories."""
+    """Read memories."""
 
     async def _go() -> None:
         async with session(server_url=server_url, api_key=api_key) as s:
-            results = await call_recall(s, project=project, query=query, limit=limit)
+            results = await call_read(s, project=project, query=query, limit=limit)
         _print_results(results)
 
     _run(_go())

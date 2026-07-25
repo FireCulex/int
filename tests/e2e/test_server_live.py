@@ -7,7 +7,7 @@ The spec asks for three E2E concerns:
     protocol contract, not AI behavior.
 2.  Auth: missing or wrong API_KEY -> 401 on every tool.
 3.  Offline-degrade: when Gemini is unreachable (mock raised), `add` /
-    `search` / `recall` return a typed `EmbeddingError` (not a crash); `list`
+    `search` / `read` return a typed `EmbeddingError` (not a crash); `list`
     still works without an embedding call.
 
 What we actually wire:
@@ -67,7 +67,7 @@ class _FakeStore:
 
         return [SearchResult(id=uuid4(), type="architecture", content="canned", score=0.9)][:limit]
 
-    def recall(self, project: str, *, query_vector: list[float], limit: int = 5) -> list[Any]:
+    def read(self, project: str, *, query_vector: list[float], limit: int = 5) -> list[Any]:
         return self.search(project, query_vector=query_vector, limit=limit)
 
     def list(self, project: str) -> list[Any]:  # noqa: A003
@@ -257,7 +257,7 @@ async def test_mcp_client_sees_all_five_tools(
     session, _ = mcp_client
     result = await session.list_tools()
     names = {t.name for t in result.tools}
-    assert names == {"int.add", "int.delete", "int.search", "int.list", "int.recall"}
+    assert names == {"int.add", "int.delete", "int.search", "int.list", "int.read"}
 
 
 @pytest.mark.asyncio
@@ -316,14 +316,14 @@ async def test_e2e_delete_unknown_returns_false(
 
 @pytest.mark.asyncio
 @pytest.mark.e2e
-async def test_e2e_recall_passes_through(
+async def test_e2e_read_passes_through(
     mcp_client: tuple[ClientSession, str],
 ) -> None:
-    """`recall` is a v1 pass-through to `search`; returns ranked results."""
+    """`read` is a v1 pass-through to `search`; returns ranked results."""
     session, _ = mcp_client
-    out = await session.call_tool("int.recall", arguments={"project": "p", "query": "anything"})
+    out = await session.call_tool("int.read", arguments={"project": "p", "query": "anything"})
     assert out.isError is False, out
-    assert _json_items(out), "recall returned nothing"
+    assert _json_items(out), "read returned nothing"
 
 
 # =============================================================================
@@ -392,7 +392,7 @@ async def test_wrong_api_key_rejected_on_each_tool(server: tuple[str, str], bad_
 
 
 # =============================================================================
-# (3) Offline-degrade: broken embedder -> EmbeddingError on add/search/recall,
+# (3) Offline-degrade: broken embedder -> EmbeddingError on add/search/read,
 #     but `list` still works.
 # =============================================================================
 
@@ -424,11 +424,11 @@ async def test_offline_degrade_search_returns_embedding_error(
 
 @pytest.mark.asyncio
 @pytest.mark.e2e
-async def test_offline_degrade_recall_returns_embedding_error(
+async def test_offline_degrade_read_returns_embedding_error(
     degrade_client: tuple[ClientSession, str],
 ) -> None:
     session, _ = degrade_client
-    out = await session.call_tool("int.recall", arguments={"project": "p", "query": "q"})
+    out = await session.call_tool("int.read", arguments={"project": "p", "query": "q"})
     assert out.isError is True, out
     assert "embedding" in _text(out).lower()
 

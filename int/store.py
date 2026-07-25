@@ -38,6 +38,14 @@ class _QdrantClientLike(Protocol):
     def create_collection(self, *, collection_name: str, vectors_config: Any) -> None: ...
     def upsert(self, *, collection_name: str, points: Sequence[dict[str, Any]]) -> None: ...
     def delete(self, *, collection_name: str, points_selector: Any) -> bool: ...
+    def retrieve(
+        self,
+        *,
+        collection_name: str,
+        ids: Sequence[Any],
+        with_payload: bool,
+        with_vectors: bool,
+    ) -> Any: ...
     def scroll(
         self,
         *,
@@ -157,17 +165,35 @@ class QdrantStore:
         return memory.id
 
     def delete(self, memory_id: UUID) -> bool:
-        """Idempotent delete. Returns True if something was deleted, else False."""
+        """Idempotent delete. Returns True if something was deleted, else False.
+
+        Qdrant's `delete` returns an ack (`status: "completed"`) without
+        indicating whether any point actually matched the selector, so we
+        probe with `retrieve` first. An empty result means nothing to delete
+        and we return False without issuing a no-op delete -- so callers see
+        idempotent semantics (test_store.py::test_delete_missing_returns_false)
+        and the CLI prints 'false' for unknown ids.
+        """
         self.ensure_collection()
         try:
-            return bool(
-                self._client.delete(
-                    collection_name=self._collection,
-                    points_selector=[memory_id],
-                )
+            existing = self._client.retrieve(
+                collection_name=self._collection,
+                ids=[memory_id],
+                with_payload=False,
+                with_vectors=False,
+            )
+        except Exception as e:
+            raise StoreError(f"Qdrant retrieve (for delete) failed: {e}") from e
+        if not existing:
+            return False
+        try:
+            self._client.delete(
+                collection_name=self._collection,
+                points_selector=[memory_id],
             )
         except Exception as e:
             raise StoreError(f"Qdrant delete failed: {e}") from e
+        return True
 
     def search(
         self,
@@ -179,7 +205,7 @@ class QdrantStore:
         """Cosine search filtered to one project, ranked by descending score."""
         return self._do_search(project, query_vector=query_vector, limit=limit)
 
-    def recall(
+    def read(
         self,
         project: str,
         *,
@@ -206,7 +232,7 @@ class QdrantStore:
         metas: list[MemoryMetadata] = []
         from datetime import datetime
 
-        for point, _ in items:
+        for point in items:
             p = point.payload
             metas.append(
                 MemoryMetadata(
@@ -254,7 +280,7 @@ class QdrantStore:
         q = q / qn
 
         scored: list[SearchResult] = []
-        for point, _ in items:
+        for point in items:
             v = np.asarray(point.vector, dtype=np.float32)
             vn = np.linalg.norm(v)
             if vn == 0.0:

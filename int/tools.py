@@ -14,8 +14,8 @@ Per spec (docs/spec.md):
 - int.search(project, query, limit=5)     -> list[SearchResult]
 - int.list(project)                       -> list[MemoryMetadata] (no content,
                                              no embedding call)
-- int.recall(project, query, limit=5)    -> list[SearchResult] (pass-through
-                                             to search in v1)
+- int.read(project, query, limit=5)      -> list[SearchResult] (pass-through
+                                              to search in v1)
 
 Validation: empty / malformed / missing-required inputs raise our own
 int.models.ValidationError (distinct from pydantic's), so int.server can map
@@ -51,7 +51,7 @@ class _StoreLike(Protocol):
         query_vector: Sequence[float],
         limit: int = 5,
     ) -> builtins.list[SearchResult]: ...
-    def recall(
+    def read(
         self,
         project: str,
         *,
@@ -187,10 +187,10 @@ class ToolsRegistry:
                 },
             ),
             ToolDescriptor(
-                name="int.recall",
+                name="int.read",
                 description=(
-                    "Recall memories from a project by semantic query. v1 is a "
-                    "pass-through to search; reserved for future summary+recall."
+                    "Read memories from a project by semantic query. v1 is a "
+                    "pass-through to search; reserved for future summary+read."
                 ),
                 input_schema={
                     "type": "object",
@@ -245,11 +245,11 @@ class ToolsRegistry:
             store_search_method=self._store.search,
         )
 
-    async def _recall(self, args: dict[str, Any]) -> builtins.list[SearchResult]:
+    async def _read(self, args: dict[str, Any]) -> builtins.list[SearchResult]:
         return await self._do_search(
             args,
             query_method=self._embedder.embed_query,
-            store_search_method=self._store.recall,
+            store_search_method=self._store.read,
         )
 
     async def _list(self, args: dict[str, Any]) -> builtins.list[MemoryMetadata]:
@@ -281,7 +281,7 @@ ToolsRegistry._dispatch = {
     "int.delete": ToolsRegistry._delete,
     "int.search": ToolsRegistry._search,
     "int.list": ToolsRegistry._list,
-    "int.recall": ToolsRegistry._recall,
+    "int.read": ToolsRegistry._read,
 }
 
 

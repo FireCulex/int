@@ -59,7 +59,7 @@ class Memory(BaseModel):
 
 
 class SearchResult(BaseModel):
-    """One hit from a search or recall query."""
+    """One hit from a search or read query."""
 
     model_config = ConfigDict(extra="forbid")
 

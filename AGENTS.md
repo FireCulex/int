@@ -12,7 +12,7 @@ The server is Python/FastAPI (3.14+, uv-managed). Vector store is Qdrant (separa
 
 - `opencode.json` — root OpenCode config. Delegates runtime behavior to `~/github/agent-skills/AGENTS.md` (read it first).
 - `int/` — the MCP server package (FastAPI + MCP tools + Qdrant client + Gemini embedder).
-- `int_cli/` — dev/ops CLI for manual inspection (`int-cli add|search|list|delete|recall`). Talks to the server over HTTP, same `API_KEY` as any MCP client.
+- `int_cli/` — dev/ops CLI for manual inspection (`int-cli add|search|list|delete|read`). Talks to the server over HTTP, same `API_KEY` as any MCP client.
 - `tests/` — `unit/` (fast, no network), `integration/` (real Qdrant, mocked Gemini), `e2e/` (live server over HTTP).
 - `docs/` — `intent.md` (project intent, source of truth for downstream skills), `spec.md` (technical spec), `deployment.md`.
 - `tasks/` — `plan.md` and `todo.md` produced by `planning-and-task-breakdown`.
@@ -56,5 +56,5 @@ These are policies for the assistant using `int`, not for the server's code.
 ## Boundaries
 
 - **Always:** run the gate before commit; validate inputs at MCP/HTTP boundaries; TDD for non-trivial store/embedding logic; update `docs/intent.md` and this file before code when schema breaks.
-- **Ask first:** swapping the embedding model or changing the collection dimension; adding new MCP tools beyond v1's five (`add`/`delete`/`search`/`list`/`recall`); adding any dependency; changing the compose service topology; introducing auth beyond the static shared key.
+- **Ask first:** swapping the embedding model or changing the collection dimension; adding new MCP tools beyond v1's five (`add`/`delete`/`search`/`list`/`read`); adding any dependency; changing the compose service topology; introducing auth beyond the static shared key.
 - **Never:** commit `.env` or real API keys; log raw memory content at INFO (log hashes + metadata only); add per-user accounts or multi-tenancy in v1; add TLS in v1; edit vendor directories (`node_modules`, `.venv`, Qdrant data volume); delete failing tests without replacing them.

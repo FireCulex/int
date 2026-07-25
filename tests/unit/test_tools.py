@@ -10,7 +10,7 @@ Per spec (docs/spec.md):
 - int.delete(memory_id) -> deleted: bool
 - int.search(project, query, limit=5) -> list[SearchResult]
 - int.list(project) -> list[MemoryMetadata] (no content, no embedding call)
-- int.recall(project, query, limit=5) -> list[SearchResult] (pass-through to
+- int.read(project, query, limit=5) -> list[SearchResult] (pass-through to
   search in v1)
 
 Validation: each tool raises int.models.ValidationError for bad input
@@ -60,7 +60,7 @@ class FakeStore:
             SearchResult(id=uuid.uuid4(), type="command", content="canned2", score=0.5),
         ][:limit]
 
-    def recall(
+    def read(
         self,
         project: str,
         *,
@@ -114,7 +114,7 @@ def _make_tools() -> tuple[Any, FakeStore, FakeEmbedder]:
 def test_tools_registry_lists_the_five_tools() -> None:
     tools, _, _ = _make_tools()
     names = {t.name for t in tools.list_tools()}
-    assert names == {"int.add", "int.delete", "int.search", "int.list", "int.recall"}
+    assert names == {"int.add", "int.delete", "int.search", "int.list", "int.read"}
 
 
 def test_each_tool_has_a_description() -> None:
@@ -132,7 +132,7 @@ def test_tool_input_schemas_match_spec() -> None:
     assert schemas["int.delete"] == {"memory_id"}
     assert schemas["int.search"] == {"project", "query"}
     assert schemas["int.list"] == {"project"}
-    assert schemas["int.recall"] == {"project", "query"}
+    assert schemas["int.read"] == {"project", "query"}
 
 
 # --- int.add ---
@@ -358,35 +358,35 @@ async def test_list_missing_project_raises_validation_error() -> None:
         await tools.call("int.list", {})  # type: ignore[call-arg]
 
 
-# --- int.recall ---
+# --- int.read ---
 
 
 @pytest.mark.asyncio
-async def test_recall_passes_through_to_search_in_v1() -> None:
+async def test_read_passes_through_to_search_in_v1() -> None:
     from int.models import SearchResult
 
     tools, _, _ = _make_tools()
-    results = await tools.call("int.recall", {"project": "p", "query": "stack"})
+    results = await tools.call("int.read", {"project": "p", "query": "stack"})
     assert all(isinstance(r, SearchResult) for r in results)
 
 
 @pytest.mark.asyncio
-async def test_recall_default_limit_higher_than_search_if_spec_calls_for_it() -> None:
-    """In v1 recall is a thin pass-through. Default limit is 5 (same as
-    search); a higher default is reserved for a future summary+recall behavior.
+async def test_read_default_limit_higher_than_search_if_spec_calls_for_it() -> None:
+    """In v1 read is a thin pass-through. Default limit is 5 (same as
+    search); a higher default is reserved for a future summary+read behavior.
     Tests the actual v1 contract."""
     tools, store, _ = _make_tools()
-    await tools.call("int.recall", {"project": "p", "query": "q"})
+    await tools.call("int.read", {"project": "p", "query": "q"})
     assert store.search_calls[0][2] == 5
 
 
 @pytest.mark.asyncio
-async def test_recall_empty_query_raises_validation_error() -> None:
+async def test_read_empty_query_raises_validation_error() -> None:
     from int.models import ValidationError
 
     tools, _, _ = _make_tools()
     with pytest.raises(ValidationError):
-        await tools.call("int.recall", {"project": "p", "query": ""})
+        await tools.call("int.read", {"project": "p", "query": ""})
 
 
 # --- Unknown tool routing ---
