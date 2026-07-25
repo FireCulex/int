@@ -4,21 +4,21 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
 
 ## Phase 1 — Foundation
 
-- [ ] **Task 1: Repo skeleton + pyproject.toml + uv lockfile**
+- [x] **Task 1: Repo skeleton + pyproject.toml + uv lockfile**
   - Acceptance: `uv sync` works; `uv run pytest` collects 0 tests and passes; `uv run ruff check .` and `uv run mypy int` pass against empty packages `int/` and `int_cli/`.
   - Verify: `uv sync && uv run pytest && uv run ruff check . && uv run mypy int`
   - Dependencies: None
   - Files: `pyproject.toml`, `int/__init__.py`, `int_cli/__init__.py`, `tests/__init__.py`, `tests/conftest.py`, `tests/unit/__init__.py`, `README.md` (placeholder)
   - Scope: S
 
-- [ ] **Task 2: Config loading (`int/config.py`)**
+- [x] **Task 2: Config loading (`int/config.py`)**
   - Acceptance: `Settings` (pydantic-settings) loads every env var from the spec table; required vars (`API_KEY`, `GEMINI_API_KEY`) missing → clear `ValidationError` at server startup; optional vars default correctly.
   - Verify: `uv run pytest tests/unit/test_config.py` covers present/missing/default cases; `uv run mypy int` passes.
   - Dependencies: Task 1
   - Files: `int/config.py`, `tests/unit/test_config.py`
   - Scope: S
 
-- [ ] **Task 3: Pydantic models (`int/models.py`)**
+- [x] **Task 3: Pydantic models (`int/models.py`)**
   - Acceptance: `Memory`, `SearchResult`, and typed errors (`EmbeddingError`, `StoreError`, `AuthError`, `ValidationError`) defined; `Memory.type` is a free string (not an enum); all fields typed; `mypy --strict` passes.
   - Verify: `uv run pytest tests/unit/test_models.py` covers construction + validation; `uv run mypy int` passes.
   - Dependencies: Task 1
@@ -26,27 +26,27 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
   - Scope: S
 
 ### Checkpoint: Foundation
-- [ ] Gate passes on the skeleton
-- [ ] Config loads from env; required-missing fails fast with a clear message
-- [ ] Models satisfy the spec's data shape
+- [x] Gate passes on the skeleton
+- [x] Config loads from env; required-missing fails fast with a clear message
+- [x] Models satisfy the spec's data shape
 
 ## Phase 2 — Embedder + Store
 
-- [ ] **Task 4: Gemini embedder wrapper (`int/embeddings.py`)**
+- [x] **Task 4: Gemini embedder wrapper (`int/embeddings.py`)**
   - Acceptance: `Embedder` exposes `embed_document(text)` and `embed_query(text)`; both call Gemini with `RETRIEVAL_DOCUMENT` / `RETRIEVAL_QUERY` task_type respectively and `output_dimensionality = settings.GEMINI_EMBEDDING_DIMENSIONS`; output is L2-normalized (norm == 1.0 within float tolerance); zero-norm vector raises `EmbeddingError`. Callers never specify task_type. Real Gemini client is injected for tests; SDK call is mocked.
   - Verify: `uv run pytest tests/unit/test_embeddings.py` asserts (a) task_type is correct for each method, (b) returned vector is L2-normalized, (c) output_dimensionality matches config, (d) zero-norm raises `EmbeddingError`. `uv run mypy int` passes.
   - Dependencies: Tasks 2, 3
   - Files: `int/embeddings.py`, `tests/unit/test_embeddings.py`
   - Scope: M
 
-- [ ] **Task 5: Qdrant store (`int/store.py`)**
+- [x] **Task 5: Qdrant store (`int/store.py`)**
   - Acceptance: `QdrantStore` exposes `add(memory, embedding) -> UUID`, `delete(uuid) -> bool`, `search(project, query_vec, limit) -> list[SearchResult]`, `list(project) -> list[Memory]` (metadata only, no content, no embedding call), `recall(project, query_vec, limit) -> list[SearchResult]`. Project filter applied on every search/recall. Collection auto-created on first use with the configured dimension; startup asserts an existing collection's dimension matches `GEMINI_EMBEDDING_DIMENSIONS` and fails fast on mismatch. `delete` on a missing id returns `False` (idempotent).
   - Verify: `uv run pytest tests/unit/test_store.py` with a fake Qdrant client covers all five methods + project filtering + dimension fail-fast + idempotent delete. `uv run mypy int` passes.
   - Dependencies: Tasks 2, 3
   - Files: `int/store.py`, `tests/unit/test_store.py`
   - Scope: M
 
-- [ ] **Task 6: Embedder + store integration (real Qdrant, mocked Gemini)**
+- [x] **Task 6: Embedder + store integration (real Qdrant, mocked Gemini)**
   - Acceptance: Integration test stands up Qdrant (via `testcontainers-python` or `docker-compose.test.yml`), uses `FakeEmbedder` returning deterministic L2-normalized 768-dim vectors, stores a representative architecture synthesis as fixture content, searches semantically, and asserts: (a) result in top 3 with cosine ≥ 0.6, (b) search project A returns zero hits from project B, (c) every stored vector has `norm == 1.0` within float tolerance.
   - Verify: `uv run pytest tests/integration/test_full_crud.py` passes (requires Docker for Qdrant). 
   - Dependencies: Tasks 4, 5
@@ -54,14 +54,14 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
   - Scope: M
 
 ### Checkpoint: Embedder + Store
-- [ ] Integration: stored synthesis retrievable in top 3 with score ≥ 0.6
-- [ ] Integration: project-A search returns zero hits from project B
-- [ ] Invariant: every stored vector is L2-normalized
-- [ ] Gate passes
+- [x] Integration: stored synthesis retrievable in top 3 with score ≥ 0.6
+- [x] Integration: project-A search returns zero hits from project B
+- [x] Invariant: every stored vector is L2-normalized
+- [x] Gate passes
 
 ## Phase 3 — MCP Server + Tools
 
-- [ ] **Task 7: MCP tool definitions (`int/tools.py`) — spike + implement**
+- [x] **Task 7: MCP tool definitions (`int/tools.py`) — spike + implement**
   - Acceptance: First a 10-line spike confirms the pinned `mcp` SDK version supports Streamable HTTP. Then the five tools are defined: `int.add`, `int.delete`, `int.search`, `int.list`, `int.recall`. Each tool validates inputs via Pydantic, calls `Embedder` + `QdrantStore`, and returns the spec's output shapes. `list` returns metadata only (no content, no embedding call). `recall` is a thin pass-through to `search` with a higher default limit.
   - Verify: `uv run pytest tests/unit/test_tools.py` covers each tool's signature, shape, and error paths (missing project, empty content, bad UUID). `uv run mypy int` passes.
   - Dependencies: Tasks 4, 5
@@ -141,12 +141,38 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
     and the missing-API_KEY->exit 2 path. The MCP HTTP seam is patched at
     `int_cli.main.session` so no network is touched.
 
-- [ ] **Task 11: Dockerfile + docker-compose.yml + `.env.example`**
+- [x] **Task 11: Dockerfile + docker-compose.yml + `.env.example`**
   - Acceptance: Multi-stage `Dockerfile` builds a slim Python image running the server with a non-root user. `docker-compose.yml` defines two services: `int` (the server) and `qdrant`, with `int` depending on Qdrant's healthcheck. `.env.example` documents every env var from the spec table with comments and no values. `docker compose up -d` from a clean clone brings up server + Qdrant within 60s on a warm cache.
   - Verify: `docker compose build && docker compose up -d && docker compose ps` shows both services healthy; `docker compose down` cleans up.
   - Dependencies: Task 8
   - Files: `Dockerfile`, `docker-compose.yml`, `.env.example`, `.dockerignore`
   - Scope: M
+  - Done: Multi-stage `Dockerfile` on `python:3.14-slim` — builder stage
+    runs `uv sync --locked --no-dev`, runtime stage copies the venv + app
+    source and drops to a non-root `int` user. `.dockerignore` uses a
+    whitelist (`*` then `!` re-allow) so only `pyproject.toml`, `uv.lock`,
+    `README.md`, `int/`, `int_cli/` enter the build context. `docker-compose.yml`
+    declares `qdrant` (with a `/dev/tcp` healthcheck) and `int` (with a
+    `python urllib` healthcheck — no curl in the slim image). `env_file:
+    .env` is marked `required: false` so compose works on a fresh clone
+    with no `.env`. `int` depends_on `qdrant: condition: service_healthy`.
+    Verified end-to-end: `docker compose up -d` brings both services to
+    `healthy`, `GET /healthz` returns `{"status":"ok"}`, and a manual MCP
+    `initialize` + `tools/list` over `/mcp/` advertises all five tools
+    (`int.add`/`int.delete`/`int.search`/`int.list`/`int.recall`) with the
+    correct inputSchema. Bug fix during this task: `_VectorParams` shim in
+    `int/store.py` didn't satisfy `qdrant_client`'s real validation when
+    the server actually called `create_collection` against live Qdrant —
+    replaced with a lazy `from qdrant_client.http.models import VectorParams,
+    Distance` so the unit-test fake (which doesn't need qdrant_client
+    installed) isn't affected. Also corrected the `_QdrantClientLike`
+    Protocol's `collection_exists` / `get_collection` signatures from
+    `name=` to `collection_name=` (the real SDK kwarg) and updated
+    `tests/unit/test_store.py`'s FakeClient to read `.size` from either
+    the real `VectorParams` or the old shim shape. Sideline fix:
+    `tests/unit/test_config.py` now constructs `Settings(_env_file=None)`
+    so a stray `.env` in the repo root doesn't mask required-missing env
+    vars during tests.
 
 - [ ] **Task 12: `docs/deployment.md`**
   - Acceptance: Doc covers: clone → `cp .env.example .env` → fill in `API_KEY` + `GEMINI_API_KEY` → `docker compose up -d`. How to point OpenCode at the server (`opencode.json` MCP entry pointing at `http://localhost:8000/mcp` with the `API_KEY` env). How to use `int-cli` for inspection. Common pitfalls: wrong dimension after changing env, Qdrant data volume reset, embedding-outage graceful behavior.

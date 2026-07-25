@@ -339,4 +339,16 @@ def cli_app() -> FastAPI:
     return build_app(settings=Settings())  # type: ignore[call-arg]
 
 
+# PEP 562 lazy attribute: `uvicorn int.server:app` resolves `app` here only
+# when explicitly referenced, so `import int.server` (e.g. for tests calling
+# `build_app(api_key=..., store=..., embedder=...)` directly) does NOT trigger
+# `Settings()` resolution. The real app is constructed the first time an
+# ASGI server imports it; `Settings()` reads env then and fails fast if
+# `API_KEY` or `GEMINI_API_KEY` is missing -- exactly the spec's behavior.
+def __getattr__(name: str) -> Any:
+    if name == "app":
+        return cli_app()
+    raise AttributeError(f"module 'int.server' has no attribute {name!r}")
+
+
 __all__ = ["build_app", "cli_app", "masked"]

@@ -66,11 +66,11 @@ class FakeQdrantClient:
         self.collections: dict[str, FakeCollection] = {}
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    def get_collection(self, *, name: str) -> FakeCollection:
-        self.calls.append(("get_collection", {"name": name}))
-        if name not in self.collections:
-            raise _QdrantCollectionMissing(name)
-        return self.collections[name]
+    def get_collection(self, *, collection_name: str) -> FakeCollection:
+        self.calls.append(("get_collection", {"collection_name": collection_name}))
+        if collection_name not in self.collections:
+            raise _QdrantCollectionMissing(collection_name)
+        return self.collections[collection_name]
 
     def create_collection(
         self,
@@ -79,11 +79,15 @@ class FakeQdrantClient:
         vectors_config: Any,
     ) -> None:
         self.calls.append(("create_collection", {"collection_name": collection_name}))
-        dim = vectors_config.params.size
+        # Real qdrant_client's VectorParams exposes `.size` directly; the
+        # legacy shim had `.params.size`. Support both for forward-compat.
+        dim = getattr(vectors_config, "size", None)
+        if dim is None:
+            dim = vectors_config.params.size
         self.collections[collection_name] = FakeCollection(dim=dim)
 
-    def collection_exists(self, *, name: str) -> bool:
-        return name in self.collections
+    def collection_exists(self, *, collection_name: str) -> bool:
+        return collection_name in self.collections
 
     def upsert(self, *, collection_name: str, points: list[dict[str, Any]]) -> None:
         self.calls.append(("upsert", {"collection_name": collection_name, "n_points": len(points)}))

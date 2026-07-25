@@ -33,8 +33,8 @@ class _UpsertLike(Protocol):
 
 
 class _QdrantClientLike(Protocol):
-    def get_collection(self, *, name: str) -> Any: ...
-    def collection_exists(self, *, name: str) -> bool: ...
+    def get_collection(self, *, collection_name: str) -> Any: ...
+    def collection_exists(self, *, collection_name: str) -> bool: ...
     def create_collection(self, *, collection_name: str, vectors_config: Any) -> None: ...
     def upsert(self, *, collection_name: str, points: Sequence[dict[str, Any]]) -> None: ...
     def delete(self, *, collection_name: str, points_selector: Any) -> bool: ...
@@ -90,8 +90,8 @@ class QdrantStore:
         if self._ensured:
             return
 
-        if self._client.collection_exists(name=self._collection):
-            existing = self._client.get_collection(name=self._collection)
+        if self._client.collection_exists(collection_name=self._collection):
+            existing = self._client.get_collection(collection_name=self._collection)
             # Qdrant exposes config.params.vectors.size for the dim, but our
             # tests use a fake; both expose `.dim` via the FakeCollection's
             # own attribute. Read the dimension through a small dispatch so
@@ -106,7 +106,13 @@ class QdrantStore:
                 )
         else:
             try:
-                vectors_config = _VectorParams(size=self._dim, distance="Cosine")
+                # Import the real Qdrant models lazily so the unit tests (which
+                # use a FakeClient that doesn't actually call create_collection)
+                # don't need qdrant_client installed. The integration / E2E tests
+                # do import qdrant_client for real, so this is available there.
+                from qdrant_client.http.models import Distance, VectorParams
+
+                vectors_config = VectorParams(size=self._dim, distance=Distance.COSINE)
                 self._client.create_collection(
                     collection_name=self._collection,
                     vectors_config=vectors_config,
@@ -288,17 +294,6 @@ def _to_uuid(point_id: Any) -> UUID:
     if isinstance(point_id, UUID):
         return point_id
     return UUID(str(point_id))
-
-
-class _VectorParams:
-    """Minimal stand-in for qdrant_client.http.models.VectorParams.
-
-    Real code uses qdrant_client's own class; our tests plug this in. The
-    store only ever reads `.params.size` and `.params.distance` indirectly.
-    """
-
-    def __init__(self, *, size: int, distance: str) -> None:
-        self.params = type("P", (), {"size": size, "distance": distance})()
 
 
 __all__ = ["QdrantStore"]

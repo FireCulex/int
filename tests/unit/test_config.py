@@ -14,10 +14,15 @@ from pydantic import ValidationError
 
 
 def _settings_from_env() -> object:
-    """Construct Settings using only env vars set on the current process."""
+    """Construct Settings using only env vars set on the current process.
+
+    Pass `_env_file=None` so a stray `.env` in the repo root (used for
+    manual `docker compose` runs) doesn't leak into unit tests and mask
+    the absence of required env vars.
+    """
     from int.config import Settings
 
-    return Settings()
+    return Settings(_env_file=None)
 
 
 def test_required_api_key_missing_raises(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,6 +5,7 @@ services:
     volumes:
       - qdrant-data:/qdrant/storage
     healthcheck:
+      # Qdrant exposes a /healthz on the REST port (6333).
       test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
       interval: 5s
       timeout: 3s
@@ -16,14 +17,33 @@ services:
   int:
     build: .
     restart: unless-stopped
+    # Optional env file -- if missing, compose still brings up both services
+    # and the `int` container exits with a clear Settings validation error
+    # (API_KEY / GEMINI_API_KEY required). The user copy `cp .env.example .env`
+    # and fill in values; see docs/deployment.md.
     env_file:
-      - .env
+      - path: .env
+        required: false
+    environment:
+      # Internal compose network endpoint for Qdrant. Hardcoded here so the
+      # `int` service always reaches the companion Qdrant container even when
+      # no .env is present.
+      QDRANT_URL: http://qdrant:6333
     depends_on:
       qdrant:
         condition: service_healthy
     ports:
       - "8000:8000"
-    # QDRANT_URL defaults to http://qdrant:6333 inside the compose network.
+    healthcheck:
+      # FastAPI /healthz is exempt from API_KEY auth (server.py middleware).
+      # The slim runtime image has no curl; use python's urllib against /healthz.
+      test:
+        - CMD-SHELL
+        - "python -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://127.0.0.1:8000/healthz\",timeout=2).status==200 else 1)'"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
 volumes:
   qdrant-data:

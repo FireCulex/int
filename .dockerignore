@@ -1,18 +1,39 @@
+# dockerignore for the int server builder context.
+# Keep the build context small and exclude everything the runtime image
+# does not need, while allowing the minimum hatchling/uv requires:
+#   - pyproject.toml + uv.lock (deps + project metadata)
+#   - README.md (referenced by `readme = "README.md"` in pyproject.toml)
+#   - int/ + int_cli/ (the installed packages + server entrypoint)
+
+# Exclude everything first; re-allow the few things we need.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!int/
+!int_cli/
+
+# Explicit re-exclusions for any per-file leftovers under the allowed dirs.
 .git
 .gitignore
 .opencode
 docs
 tasks
 tests
+
+# Env / secrets: NEVER ship .env (it has API_KEY + GEMINI_API_KEY).
 .env
-.env.example
-README.md
-*.md
-!pyproject.toml
+.env.*
+
+# Test/CV/IDE artifacts.
+.dockerignore
 Dockerfile
 docker-compose.yml
 docker-compose.test.yml
 __pycache__
 *.pyc
+.pytest_cache
+.coverage
+.mypy_cache
 .venv
 node_modules
