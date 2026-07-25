@@ -115,12 +115,31 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
 
 ## Phase 4 — CLI + Docker + Docs
 
-- [ ] **Task 10: `int-cli` (`int_cli/main.py`)**
+- [x] **Task 10: `int-cli` (`int_cli/main.py`)**
   - Acceptance: Typer CLI with five commands (`add`, `delete`, `search`, `list`, `recall`) matching the spec's tool surface. Each calls the server over HTTP with the `API_KEY` header; reads `SERVER_IP` and `API_KEY` from env. Responses parsed via the shared Pydantic models. Output is human-readable; `search` shows ranked results with score; `list` shows metadata only.
   - Verify: `uv run int-cli --help` lists all five commands; `uv run pytest tests/unit/test_cli.py` covers argument parsing and HTTP envelope (server mocked). `uv run mypy int` and `uv run mypy int_cli` pass.
   - Dependencies: Task 7 (tool shapes / shared models)
   - Files: `int_cli/main.py`, `tests/unit/test_cli.py`, entry-point configured in `pyproject.toml`
   - Scope: M
+  - Done: `int_cli/client.py` is the MCP-over-HTTP seam (initialize ->
+    notifications/initialized -> tools/call) with typed error categories
+    (CliConfigError=2 / CliAuthError=3 / CliConnectionError=4 /
+    CliRemoteError=5) and an injectable `_opener` for tests.
+    `int_cli/main.py` exposes five Typer commands. The `list` command is
+    defined as `def list_cmd` with `@app.command("list")` so the Python
+    builtin `list` stays usable in the module's type annotations.
+    `int-cli` talks the same MCP Streamable HTTP transport as OpenCode,
+    sending the `API_KEY` header on every request. Env: `INT_SERVER_URL`
+    (default `http://localhost:8000/mcp`) + `API_KEY` (required);
+    `--server-url` and `--api-key` flags override per invocation. Output is
+    human-readable: `add` prints the new UUID, `delete` prints `true`/`false`,
+    `search`/`recall` print ranked rows (`rank. score=X.XXXX type=… id=…` +
+    a truncated content snippet), `list` prints metadata rows
+    (`created_at  type  id`, no content). 16 unit tests cover argument
+    parsing, env resolution (default/override/explicit-wins), each
+    command's happy path + output formatting, the isError->exit 5 path,
+    and the missing-API_KEY->exit 2 path. The MCP HTTP seam is patched at
+    `int_cli.main.session` so no network is touched.
 
 - [ ] **Task 11: Dockerfile + docker-compose.yml + `.env.example`**
   - Acceptance: Multi-stage `Dockerfile` builds a slim Python image running the server with a non-root user. `docker-compose.yml` defines two services: `int` (the server) and `qdrant`, with `int` depending on Qdrant's healthcheck. `.env.example` documents every env var from the spec table with comments and no values. `docker compose up -d` from a clean clone brings up server + Qdrant within 60s on a warm cache.
