@@ -14,20 +14,22 @@ docker compose up -d          # server + Qdrant
 docker compose logs -f int    # tail server
 ```
 
-Point OpenCode at the server by adding an MCP server entry to your `opencode.json`:
+Point OpenCode at the server by adding a remote MCP entry to your `opencode.json`:
 
 ```json
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "int": {
+      "type": "remote",
       "url": "http://localhost:8000/mcp",
-      "env": { "API_KEY": "<your API_KEY>" }
+      "headers": { "API_KEY": "{env:API_KEY}" }
     }
   }
 }
 ```
 
-See `docs/deployment.md` (once written) for full setup and pitfalls.
+See `docs/deployment.md` for full setup, CLI usage, and common pitfalls.
 
 ## Tools
 
@@ -41,7 +43,7 @@ See `docs/deployment.md` (once written) for full setup and pitfalls.
 
 ## Stack
 
-Python 3.12, FastAPI + MCP (`mcp` Python SDK, Streamable HTTP), Qdrant (separate container), `gemini-embedding-001` (L2-normalized to 768 dims via MRL), Docker Compose, `uv` for dep management.
+Python 3.14, FastAPI + MCP (`mcp` Python SDK, Streamable HTTP), Qdrant (separate container), `gemini-embedding-001` (L2-normalized to 768 dims via MRL), Docker Compose, `uv` for dep management.
 
 ## License
 
