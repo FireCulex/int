@@ -67,11 +67,11 @@ class Embedder:
         self._dim = dimension
 
     async def embed_document(self, content: str) -> list[float]:
-        """For `int.add`. task_type=RETRIEVAL_DOCUMENT."""
+        """For `add`. task_type=RETRIEVAL_DOCUMENT."""
         return await self._embed(content, task_type="RETRIEVAL_DOCUMENT")
 
     async def embed_query(self, content: str) -> list[float]:
-        """For `int.search` / `int.read`. task_type=RETRIEVAL_QUERY."""
+        """For `search`. task_type=RETRIEVAL_QUERY."""
         return await self._embed(content, task_type="RETRIEVAL_QUERY")
 
     async def _embed(self, content: str, *, task_type: str) -> list[float]:

@@ -1,8 +1,8 @@
 """Unit tests for int_cli (Task 10).
 
 Covers:
-- argument parsing for each of the five commands (`add`/`delete`/`search`/
-  `list`/`read`) via Typer's CliRunner
+- argument parsing for each of the four commands (`add`/`delete`/`search`/
+  `list`) via Typer's CliRunner
 - env-driven config (`API_KEY`, `INT_SERVER_URL`) and the CLI's exit-code
   categories:
     CliConfigError      -> 2 (missing API_KEY)
@@ -181,7 +181,7 @@ def test_add_calls_int_add_and_prints_uuid(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sess = _FakeSession(
-        responses={"int.add": _CallResult(text="11111111-2222-3333-4444-555555555555")}
+        responses={"add": _CallResult(text="11111111-2222-3333-4444-555555555555")}
     )
     _patch_session_with(monkeypatch, sess)
     monkeypatch.setenv("API_KEY", "k")
@@ -203,14 +203,14 @@ def test_add_calls_int_add_and_prints_uuid(
     assert result.exit_code == 0, result.stderr
     assert result.stdout.strip() == "11111111-2222-3333-4444-555555555555"
     assert sess.calls == [
-        ("int.add", {"project": "pianoweb", "type": "architecture", "content": "flask backend"})
+        ("add", {"project": "pianoweb", "type": "architecture", "content": "flask backend"})
     ]
 
 
 def test_delete_calls_int_delete_prints_true(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    sess = _FakeSession(responses={"int.delete": _CallResult(text="true")})
+    sess = _FakeSession(responses={"delete": _CallResult(text="true")})
     _patch_session_with(monkeypatch, sess)
     monkeypatch.setenv("API_KEY", "k")
 
@@ -219,11 +219,11 @@ def test_delete_calls_int_delete_prints_true(
     result = runner.invoke(app, ["delete", "--memory-id", "11111111-2222-3333-4444-555555555555"])
     assert result.exit_code == 0, result.stderr
     assert result.stdout.strip() == "true"
-    assert sess.calls == [("int.delete", {"memory_id": "11111111-2222-3333-4444-555555555555"})]
+    assert sess.calls == [("delete", {"memory_id": "11111111-2222-3333-4444-555555555555"})]
 
 
 def test_delete_idempotent_prints_false(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
-    sess = _FakeSession(responses={"int.delete": _CallResult(text="false")})
+    sess = _FakeSession(responses={"delete": _CallResult(text="false")})
     _patch_session_with(monkeypatch, sess)
     monkeypatch.setenv("API_KEY", "k")
 
@@ -251,7 +251,7 @@ def test_search_prints_ranked_rows_with_score(
             "score": 0.45,
         },
     ]
-    sess = _FakeSession(responses={"int.search": _CallResult(text=json.dumps({"items": items}))})
+    sess = _FakeSession(responses={"search": _CallResult(text=json.dumps({"items": items}))})
     _patch_session_with(monkeypatch, sess)
     monkeypatch.setenv("API_KEY", "k")
 
@@ -266,13 +266,13 @@ def test_search_prints_ranked_rows_with_score(
     assert "flask backend" in out
     # the second row's score also present
     assert "score=0.4500" in out
-    assert sess.calls == [("int.search", {"project": "p", "query": "backend", "limit": 10})]
+    assert sess.calls == [("search", {"project": "p", "query": "backend", "limit": 10})]
 
 
 def test_search_empty_results_prints_placeholder(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    sess = _FakeSession(responses={"int.search": _CallResult(text=json.dumps({"items": []}))})
+    sess = _FakeSession(responses={"search": _CallResult(text=json.dumps({"items": []}))})
     _patch_session_with(monkeypatch, sess)
     monkeypatch.setenv("API_KEY", "k")
 
@@ -299,7 +299,7 @@ def test_list_prints_metadata_without_content(
             "created_at": "2026-02-02T08:00:00.000Z",
         },
     ]
-    sess = _FakeSession(responses={"int.list": _CallResult(text=json.dumps({"items": items}))})
+    sess = _FakeSession(responses={"list": _CallResult(text=json.dumps({"items": items}))})
     _patch_session_with(monkeypatch, sess)
     monkeypatch.setenv("API_KEY", "k")
 
@@ -318,34 +318,7 @@ def test_list_prints_metadata_without_content(
     # absence: there's no 'content' label or snippet line.
     assert "content=" not in out
     assert "snippet" not in out
-    assert sess.calls == [("int.list", {"project": "p"})]
-
-
-def test_read_calls_int_read_pass_through(
-    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    items = [
-        {
-            "id": "11111111-2222-3333-4444-555555555555",
-            "type": "learned-pattern",
-            "content": "always run ruff before committing",
-            "score": 0.88,
-        }
-    ]
-    sess = _FakeSession(responses={"int.read": _CallResult(text=json.dumps({"items": items}))})
-    _patch_session_with(monkeypatch, sess)
-    monkeypatch.setenv("API_KEY", "k")
-
-    from int_cli.main import app
-
-    result = runner.invoke(
-        app, ["read", "--project", "int", "--query", "what to do before commit"]
-    )
-    assert result.exit_code == 0, result.stderr
-    assert "score=0.8800" in result.stdout
-    assert sess.calls == [
-        ("int.read", {"project": "int", "query": "what to do before commit", "limit": 5})
-    ]
+    assert sess.calls == [("list", {"project": "p"})]
 
 
 # ===========================================================================
@@ -355,7 +328,7 @@ def test_read_calls_int_read_pass_through(
 
 def test_tool_is_error_envelope_exits_5(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
     sess = _FakeSession(
-        responses={"int.add": _CallResult(text="project must be a non-empty string", is_error=True)}
+        responses={"add": _CallResult(text="project must be a non-empty string", is_error=True)}
     )
     _patch_session_with(monkeypatch, sess)
     monkeypatch.setenv("API_KEY", "k")

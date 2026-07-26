@@ -2,7 +2,7 @@
 
 Confirms:
 - the app exposes the MCP endpoint at /mcp
-- each of the five tools is registered with the SDK (list_tools response)
+- each of the four tools is registered with the SDK (list_tools response)
 - the API_KEY header is required; missing or wrong -> 401 (AuthError envelope)
 - typed errors from tools (ValidationError / EmbeddingError / StoreError /
   AuthError) translate to MCP-shaped error responses with code + message,
@@ -52,9 +52,6 @@ class FakeStore:
         return [
             SearchResult(id=uuid4(), type="architecture", content="canned", score=0.9),
         ][:limit]
-
-    def read(self, project: str, *, query_vector: list[float], limit: int = 5) -> list[Any]:
-        return self.search(project, query_vector=query_vector, limit=limit)
 
     def list(self, project: str) -> list[Any]:  # noqa: A003
         from datetime import UTC, datetime
@@ -233,15 +230,14 @@ async def test_tools_exposed_at_mcp_endpoint_with_correct_names(
     assert "result" in body, body
     names = {t["name"] for t in body["result"].get("tools", [])}
     assert names == {
-        "int.add",
-        "int.delete",
-        "int.search",
-        "int.list",
-        "int.read",
+        "add",
+        "delete",
+        "search",
+        "list",
     }
 
 
-# --- int.add via HTTP/MCP ---
+# --- add via HTTP/MCP ---
 
 
 @pytest.mark.asyncio
@@ -254,7 +250,7 @@ async def test_add_tool_invocation_returns_memory_id(
         id_=7,
         method="tools/call",
         params={
-            "name": "int.add",
+            "name": "add",
             "arguments": {
                 "project": "pianoweb",
                 "type": "architecture",
@@ -279,7 +275,7 @@ async def test_add_tool_with_empty_project_returns_typed_error(
         id_=1,
         method="tools/call",
         params={
-            "name": "int.add",
+            "name": "add",
             "arguments": {"project": "", "type": "t", "content": "x"},
         },
     )
@@ -300,7 +296,7 @@ async def test_add_tool_with_missing_content_returns_typed_error(
         id_=2,
         method="tools/call",
         params={
-            "name": "int.add",
+            "name": "add",
             "arguments": {"project": "p", "type": "t"},  # missing content
         },
     )
@@ -309,7 +305,7 @@ async def test_add_tool_with_missing_content_returns_typed_error(
     assert "content" in result["content"][0]["text"].lower()
 
 
-# --- int.delete via HTTP/MCP ---
+# --- delete via HTTP/MCP ---
 
 
 @pytest.mark.asyncio
@@ -322,7 +318,7 @@ async def test_delete_missing_memory_returns_false(
         id_=1,
         method="tools/call",
         params={
-            "name": "int.delete",
+            "name": "delete",
             "arguments": {"memory_id": str(uuid4())},
         },
     )
@@ -339,7 +335,7 @@ async def test_delete_malformed_uuid_returns_typed_error(
         id_=1,
         method="tools/call",
         params={
-            "name": "int.delete",
+            "name": "delete",
             "arguments": {"memory_id": "not-a-uuid"},
         },
     )
@@ -347,22 +343,7 @@ async def test_delete_malformed_uuid_returns_typed_error(
     assert "uuid" in body["result"]["content"][0]["text"].lower()
 
 
-# --- int.search / int.list / int.read ---
-
-
-@pytest.mark.asyncio
-async def test_read_tool_passes_through(client: AsyncClient) -> None:
-    await _init_session(client)
-    body = await _call(
-        client,
-        id_=1,
-        method="tools/call",
-        params={
-            "name": "int.read",
-            "arguments": {"project": "p", "query": "q"},
-        },
-    )
-    assert body["result"]["isError"] is False, body
+# --- list ---
 
 
 @pytest.mark.asyncio
@@ -372,7 +353,7 @@ async def test_list_tool_returns_metadata(client: AsyncClient) -> None:
         client,
         id_=1,
         method="tools/call",
-        params={"name": "int.list", "arguments": {"project": "p"}},
+        params={"name": "list", "arguments": {"project": "p"}},
     )
     assert body["result"]["isError"] is False, body
 
@@ -389,7 +370,7 @@ async def test_unknown_tool_returns_mcp_error_not_500(
         client,
         id_=1,
         method="tools/call",
-        params={"name": "int.does-not-exist", "arguments": {}},
+        params={"name": "does-not-exist", "arguments": {}},
     )
     # Either an error envelope (error:{}) or an isError result -- never 500.
     assert body.get("_http_status", 200) != 500, body

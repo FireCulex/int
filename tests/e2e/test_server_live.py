@@ -3,12 +3,12 @@
 The spec asks for three E2E concerns:
 
 1.  Spin the server + Qdrant, connect a real MCP client over HTTP with the
-    correct API_KEY, exercise all five tools end-to-end. Verifies the MCP
+    correct API_KEY, exercise all four tools end-to-end. Verifies the MCP
     protocol contract, not AI behavior.
 2.  Auth: missing or wrong API_KEY -> 401 on every tool.
 3.  Offline-degrade: when Gemini is unreachable (mock raised), `add` /
-    `search` / `read` return a typed `EmbeddingError` (not a crash); `list`
-    still works without an embedding call.
+    `search` return a typed `EmbeddingError` (not a crash); `list` still
+    works without an embedding call.
 
 What we actually wire:
 
@@ -66,9 +66,6 @@ class _FakeStore:
         from int.models import SearchResult
 
         return [SearchResult(id=uuid4(), type="architecture", content="canned", score=0.9)][:limit]
-
-    def read(self, project: str, *, query_vector: list[float], limit: int = 5) -> list[Any]:
-        return self.search(project, query_vector=query_vector, limit=limit)
 
     def list(self, project: str) -> list[Any]:  # noqa: A003
         from datetime import UTC, datetime
@@ -244,20 +241,20 @@ def _json_items(out: Any) -> list[dict[str, Any]]:
 
 
 # =============================================================================
-# (1) All five tools, end-to-end, via real MCP client against live server
+# (1) All four tools, end-to-end, via real MCP client against live server
 # =============================================================================
 
 
 @pytest.mark.asyncio
 @pytest.mark.e2e
-async def test_mcp_client_sees_all_five_tools(
+async def test_mcp_client_sees_all_four_tools(
     mcp_client: tuple[ClientSession, str],
 ) -> None:
-    """`tools/list` exposes the five-tool surface with the right names."""
+    """`tools/list` exposes the four-tool surface with the right names."""
     session, _ = mcp_client
     result = await session.list_tools()
     names = {t.name for t in result.tools}
-    assert names == {"int.add", "int.delete", "int.search", "int.list", "int.read"}
+    assert names == {"add", "delete", "search", "list"}
 
 
 @pytest.mark.asyncio
@@ -268,14 +265,14 @@ async def test_e2e_add_then_list_roundtrip(
     """`add` returns a UUID; a subsequent `list` includes it (metadata only)."""
     session, _ = mcp_client
     add_out = await session.call_tool(
-        "int.add",
+        "add",
         arguments={"project": "pianoweb", "type": "architecture", "content": "flask"},
     )
     assert add_out.isError is False, add_out
     mem_id = _text(add_out)
     UUID(mem_id)  # raises if not a UUID
 
-    list_out = await session.call_tool("int.list", arguments={"project": "pianoweb"})
+    list_out = await session.call_tool("list", arguments={"project": "pianoweb"})
     assert list_out.isError is False, list_out
     ids = {str(it["id"]) for it in _json_items(list_out)}
     assert mem_id in ids, f"memory {mem_id} not in list: {ids}"
@@ -290,10 +287,10 @@ async def test_e2e_add_then_search_returns_result(
     round trip, not semantic relevance)."""
     session, _ = mcp_client
     await session.call_tool(
-        "int.add",
+        "add",
         arguments={"project": "p", "type": "command", "content": "npm test"},
     )
-    out = await session.call_tool("int.search", arguments={"project": "p", "query": "test command"})
+    out = await session.call_tool("search", arguments={"project": "p", "query": "test command"})
     assert out.isError is False, out
     items = _json_items(out)
     assert items, "search returned no items"
@@ -309,21 +306,9 @@ async def test_e2e_delete_unknown_returns_false(
     from uuid import uuid4
 
     session, _ = mcp_client
-    out = await session.call_tool("int.delete", arguments={"memory_id": str(uuid4())})
+    out = await session.call_tool("delete", arguments={"memory_id": str(uuid4())})
     assert out.isError is False, out
     assert _text(out) == "false"
-
-
-@pytest.mark.asyncio
-@pytest.mark.e2e
-async def test_e2e_read_passes_through(
-    mcp_client: tuple[ClientSession, str],
-) -> None:
-    """`read` is a v1 pass-through to `search`; returns ranked results."""
-    session, _ = mcp_client
-    out = await session.call_tool("int.read", arguments={"project": "p", "query": "anything"})
-    assert out.isError is False, out
-    assert _json_items(out), "read returned nothing"
 
 
 # =============================================================================
@@ -379,7 +364,7 @@ async def test_wrong_api_key_rejected_on_each_tool(server: tuple[str, str], bad_
         ("tools/list", {}),
         (
             "tools/call",
-            {"name": "int.list", "arguments": {"project": "p"}},
+            {"name": "list", "arguments": {"project": "p"}},
         ),
     ]
     async with httpx.AsyncClient(base_url=base_url, headers={"API_KEY": bad_key}, timeout=5.0) as c:
@@ -392,7 +377,7 @@ async def test_wrong_api_key_rejected_on_each_tool(server: tuple[str, str], bad_
 
 
 # =============================================================================
-# (3) Offline-degrade: broken embedder -> EmbeddingError on add/search/read,
+# (3) Offline-degrade: broken embedder -> EmbeddingError on add/search,
 #     but `list` still works.
 # =============================================================================
 
@@ -404,7 +389,7 @@ async def test_offline_degrade_add_returns_embedding_error(
 ) -> None:
     session, _ = degrade_client
     out = await session.call_tool(
-        "int.add",
+        "add",
         arguments={"project": "p", "type": "command", "content": "x"},
     )
     assert out.isError is True, out
@@ -417,18 +402,7 @@ async def test_offline_degrade_search_returns_embedding_error(
     degrade_client: tuple[ClientSession, str],
 ) -> None:
     session, _ = degrade_client
-    out = await session.call_tool("int.search", arguments={"project": "p", "query": "q"})
-    assert out.isError is True, out
-    assert "embedding" in _text(out).lower()
-
-
-@pytest.mark.asyncio
-@pytest.mark.e2e
-async def test_offline_degrade_read_returns_embedding_error(
-    degrade_client: tuple[ClientSession, str],
-) -> None:
-    session, _ = degrade_client
-    out = await session.call_tool("int.read", arguments={"project": "p", "query": "q"})
+    out = await session.call_tool("search", arguments={"project": "p", "query": "q"})
     assert out.isError is True, out
     assert "embedding" in _text(out).lower()
 
@@ -441,7 +415,7 @@ async def test_offline_degrade_list_works_without_embedding(
     """`list` makes no embedding call, so it must still succeed during an
     embedder outage."""
     session, _ = degrade_client
-    out = await session.call_tool("int.list", arguments={"project": "p"})
+    out = await session.call_tool("list", arguments={"project": "p"})
     assert out.isError is False, out
 
 
@@ -486,7 +460,7 @@ async def test_e2e_full_crud_over_http_with_real_qdrant(
 
         # add
         add_out = await session.call_tool(
-            "int.add",
+            "add",
             arguments={
                 "project": "pianoweb",
                 "type": "architecture",
@@ -498,22 +472,22 @@ async def test_e2e_full_crud_over_http_with_real_qdrant(
         UUID(mem_id)
 
         # list reflects it
-        list_out = await session.call_tool("int.list", arguments={"project": "pianoweb"})
+        list_out = await session.call_tool("list", arguments={"project": "pianoweb"})
         assert list_out.isError is False
         ids = {str(it["id"]) for it in _json_items(list_out)}
         assert mem_id in ids
 
         # search finds the stored memory
         s_out = await session.call_tool(
-            "int.search",
+            "search",
             arguments={"project": "pianoweb", "query": "backend"},
         )
         assert s_out.isError is False
 
         # delete -> true; idempotent delete -> false
-        d_out = await session.call_tool("int.delete", arguments={"memory_id": mem_id})
+        d_out = await session.call_tool("delete", arguments={"memory_id": mem_id})
         assert d_out.isError is False
         assert _text(d_out) == "true"
 
-        d2_out = await session.call_tool("int.delete", arguments={"memory_id": mem_id})
+        d2_out = await session.call_tool("delete", arguments={"memory_id": mem_id})
         assert _text(d2_out) == "false"

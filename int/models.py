@@ -59,7 +59,7 @@ class Memory(BaseModel):
 
 
 class SearchResult(BaseModel):
-    """One hit from a search or read query."""
+    """One hit from a search query."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -70,7 +70,7 @@ class SearchResult(BaseModel):
 
 
 class MemoryMetadata(BaseModel):
-    """Metadata-only view of a Memory (used by `int.list` -- no content)."""
+    """Metadata-only view of a Memory (used by `list` -- no content)."""
 
     model_config = ConfigDict(extra="forbid")
 

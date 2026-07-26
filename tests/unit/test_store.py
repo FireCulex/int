@@ -6,7 +6,6 @@ No network. Verifies:
 - delete(uuid) returns True if existed, False if missing (idempotent)
 - search(project, query_vec, limit) returns scored hits filtered by project
 - list(project) returns MemoryMetadata (no content, no embedding call)
-- read(project, query_vec, limit) mirrors search (thin pass-through in v1)
 - project scoping: search A returns nothing from B
 - collection auto-creates on first use with the configured dimension
 - startup assert: existing collection with wrong dimension -> StoreError fail-fast
@@ -388,24 +387,6 @@ def test_delete_missing_returns_false_idempotent() -> None:
     client.calls.clear()
     assert store.delete(missing) is False
     assert "delete" not in tuple(c[0] for c in client.calls)
-
-
-def test_read_mirrors_search_in_v1() -> None:
-    from int.models import Memory
-
-    store, _ = _make_store(dim=4)
-    store.add(
-        Memory(project="p", type="t", content="near"),
-        [1.0, 0.0, 0.0, 0.0],
-    )
-    store.add(
-        Memory(project="p", type="t", content="far"),
-        [0.0, 0.0, 0.0, 1.0],
-    )
-    search_results = store.search("p", query_vector=[1.0, 0.0, 0.0, 0.0], limit=5)
-    read_results = store.read("p", query_vector=[1.0, 0.0, 0.0, 0.0], limit=5)
-    assert [r.id for r in search_results] == [r.id for r in read_results]
-    assert [r.score for r in search_results] == [r.score for r in read_results]
 
 
 def test_dimension_mismatch_on_existing_collection_raises_store_error() -> None:

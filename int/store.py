@@ -1,6 +1,6 @@
 """int.store — Qdrant-backed project-scoped memory store.
 
-Public surface mirrors the spec's five tools (minus embedding generation,
+Public surface mirrors the spec's four tools (minus embedding generation,
 which lives in int.embeddings). The store is project-scoped: every search and
 list passes a Qdrant payload filter on the `project` field, so cross-project
 leakage is impossible by construction.
@@ -203,16 +203,6 @@ class QdrantStore:
         limit: int = 5,
     ) -> list_alias[SearchResult]:
         """Cosine search filtered to one project, ranked by descending score."""
-        return self._do_search(project, query_vector=query_vector, limit=limit)
-
-    def read(
-        self,
-        project: str,
-        *,
-        query_vector: Sequence[float],
-        limit: int = 5,
-    ) -> list_alias[SearchResult]:
-        """Thin pass-through to search in v1."""
         return self._do_search(project, query_vector=query_vector, limit=limit)
 
     def list(self, project: str) -> list_alias[MemoryMetadata]:

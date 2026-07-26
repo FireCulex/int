@@ -3,17 +3,17 @@
 The CLI talks to the int memory server using the same MCP Streamable HTTP
 transport as any MCP client (including OpenCode). It performs the
 `initialize` -> `notifications/initialized` handshake, then issues
-`tools/call` requests for each of the five tools:
+`tools/call` requests for each of the four tools:
 
     add(project, type, content)          -> memory_id string
     delete(memory_id)                    -> "true" | "false"
     search(project, query, limit=5)      -> list[SearchResult dict]
     list(project)                        -> list[MemoryMetadata dict]
-    read(project, query, limit=5)        -> list[SearchResult dict]
 
-This module owns the only place where the underlying MCP SDK is used by the
-CLI, so command functions in `main.py` can stay declarative and the seam is
-explicitly mockable for unit tests.
+Tool names are bare (the MCP server is registered under the name `int`,
+which namespaces them for clients). This module owns the only place where
+the underlying MCP SDK is used by the CLI, so command functions in `main.py`
+can stay declarative and the seam is explicitly mockable for unit tests.
 
 Configuration:
 - `INT_SERVER_URL`: full URL of the MCP endpoint (default
@@ -178,7 +178,7 @@ def _parse_text(out: Any) -> str:
 def _require_ok(out: Any, tool: str) -> str:
     """Translate an isError=True envelope into CliRemoteError."""
     if getattr(out, "isError", False):
-        raise CliRemoteError(f"int.{tool} failed: {_parse_text(out)}")
+        raise CliRemoteError(f"{tool} failed: {_parse_text(out)}")
     return _parse_text(out)
 
 
@@ -189,19 +189,19 @@ async def call_add(
     type_: str,
     content: str,
 ) -> str:
-    """Issue `int.add`. Returns the new memory's UUID string."""
+    """Issue the `add` tool. Returns the new memory's UUID string."""
     out = await session.call_tool(
-        "int.add", arguments={"project": project, "type": type_, "content": content}
+        "add", arguments={"project": project, "type": type_, "content": content}
     )
     return _require_ok(out, "add")
 
 
 async def call_delete(session: Any, *, memory_id: str) -> bool:
-    """Issue `int.delete`. Returns True iff a memory was removed.
+    """Issue the `delete` tool. Returns True iff a memory was removed.
 
-    `int.delete` returns the strings "true" / "false" -- we parse to bool.
+    `delete` returns the strings "true" / "false" -- we parse to bool.
     """
-    out = await session.call_tool("int.delete", arguments={"memory_id": memory_id})
+    out = await session.call_tool("delete", arguments={"memory_id": memory_id})
     text = _require_ok(out, "delete")
     return text.strip().lower() == "true"
 
@@ -213,28 +213,12 @@ async def call_search(
     query: str,
     limit: int = 5,
 ) -> list[dict[str, Any]]:
-    """Issue `int.search`. Returns a list of parsed SearchResult dicts."""
+    """Issue the `search` tool. Returns a list of parsed SearchResult dicts."""
     out = await session.call_tool(
-        "int.search",
+        "search",
         arguments={"project": project, "query": query, "limit": limit},
     )
     text = _require_ok(out, "search")
-    return _parse_items(text)
-
-
-async def call_read(
-    session: Any,
-    *,
-    project: str,
-    query: str,
-    limit: int = 5,
-) -> list[dict[str, Any]]:
-    """Issue `int.read` (v1 pass-through to `int.search`)."""
-    out = await session.call_tool(
-        "int.read",
-        arguments={"project": project, "query": query, "limit": limit},
-    )
-    text = _require_ok(out, "read")
     return _parse_items(text)
 
 
@@ -243,8 +227,8 @@ async def call_list(
     *,
     project: str,
 ) -> list[dict[str, Any]]:
-    """Issue `int.list`. Returns a list of metadata dicts (id, type, created_at)."""
-    out = await session.call_tool("int.list", arguments={"project": project})
+    """Issue the `list` tool. Returns a list of metadata dicts (id, type, created_at)."""
+    out = await session.call_tool("list", arguments={"project": project})
     text = _require_ok(out, "list")
     return _parse_items(text)
 
@@ -279,7 +263,6 @@ __all__ = [
     "call_add",
     "call_delete",
     "call_list",
-    "call_read",
     "call_search",
     "resolve_config",
     "session",

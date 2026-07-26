@@ -1,4 +1,4 @@
-"""int.tools — the five MCP tools exposed by the server.
+"""int.tools — the four MCP tools exposed by the server.
 
 Each tool validates its input via Pydantic, then delegates to the store /
 embedder. Auth and protocol transport live in int.server, not here.
@@ -9,13 +9,17 @@ a test harness without re-wiring. The registry exposes call-shaped methods so
 tests can exercise the orchestration without standing up a server.
 
 Per spec (docs/spec.md):
-- int.add(project, type, content)        -> memory_id (UUID str)
-- int.delete(memory_id)                    -> deleted (bool)
-- int.search(project, query, limit=5)     -> list[SearchResult]
-- int.list(project)                       -> list[MemoryMetadata] (no content,
-                                             no embedding call)
-- int.read(project, query, limit=5)      -> list[SearchResult] (pass-through
-                                              to search in v1)
+- add(project, type, content)        -> memory_id (UUID str)
+- delete(memory_id)                  -> deleted (bool)
+- search(project, query, limit=5)    -> list[SearchResult]
+- list(project)                       -> list[MemoryMetadata] (no content,
+                                       no embedding call)
+
+Tool names are bare (no `int.` prefix). The MCP server is registered under
+the server name `int` at the MCP layer, which already namespaces the tools
+for clients (e.g. OpenCode exposes them as `int_add`, `int_search`,
+`int_list`, `int_delete`). Re-prefixing the server-side tool names with
+`int.` caused OpenCode to render `int_int_add`; bare names are the fix.
 
 Validation: empty / malformed / missing-required inputs raise our own
 int.models.ValidationError (distinct from pydantic's), so int.server can map
@@ -45,13 +49,6 @@ class _StoreLike(Protocol):
     def add(self, memory: Memory, embedding: Sequence[float]) -> UUID: ...
     def delete(self, memory_id: UUID) -> bool: ...
     def search(
-        self,
-        project: str,
-        *,
-        query_vector: Sequence[float],
-        limit: int = 5,
-    ) -> builtins.list[SearchResult]: ...
-    def read(
         self,
         project: str,
         *,
@@ -104,7 +101,7 @@ def _require_uuid_str(value: Any, *, field: str) -> UUID:
 
 
 class ToolsRegistry:
-    """Owns and dispatches the five MCP tools.
+    """Owns and dispatches the four MCP tools.
 
     Constructed once at server startup with the store + embedder. The MCP
     layer (int.server) reflects on `list_tools()` to register them with the
@@ -118,7 +115,7 @@ class ToolsRegistry:
     def list_tools(self) -> builtins.list[ToolDescriptor]:
         return [
             ToolDescriptor(
-                name="int.add",
+                name="add",
                 description=(
                     "Store a memory in a project. The content is embedded "
                     "(RETRIEVAL_DOCUMENT task_type) and persisted to the project's "
@@ -143,7 +140,7 @@ class ToolsRegistry:
                 },
             ),
             ToolDescriptor(
-                name="int.delete",
+                name="delete",
                 description=(
                     "Delete a memory by ID. Idempotent: returns False if no memory "
                     "existed at that ID."
@@ -157,7 +154,7 @@ class ToolsRegistry:
                 },
             ),
             ToolDescriptor(
-                name="int.search",
+                name="search",
                 description=(
                     "Search a project's memories by semantic query. Returns ranked "
                     "results (cosine similarity, descending) with content + score."
@@ -173,7 +170,7 @@ class ToolsRegistry:
                 },
             ),
             ToolDescriptor(
-                name="int.list",
+                name="list",
                 description=(
                     "List all memories in a project. Metadata only (id, type, "
                     "created_at); no content, no embedding call."
@@ -183,22 +180,6 @@ class ToolsRegistry:
                     "required": ["project"],
                     "properties": {
                         "project": {"type": "string", "minLength": 1},
-                    },
-                },
-            ),
-            ToolDescriptor(
-                name="int.read",
-                description=(
-                    "Read memories from a project by semantic query. v1 is a "
-                    "pass-through to search; reserved for future summary+read."
-                ),
-                input_schema={
-                    "type": "object",
-                    "required": ["project", "query"],
-                    "properties": {
-                        "project": {"type": "string", "minLength": 1},
-                        "query": {"type": "string", "minLength": 1},
-                        "limit": {"type": "integer", "minimum": 1, "default": 5},
                     },
                 },
             ),
@@ -245,13 +226,6 @@ class ToolsRegistry:
             store_search_method=self._store.search,
         )
 
-    async def _read(self, args: dict[str, Any]) -> builtins.list[SearchResult]:
-        return await self._do_search(
-            args,
-            query_method=self._embedder.embed_query,
-            store_search_method=self._store.read,
-        )
-
     async def _list(self, args: dict[str, Any]) -> builtins.list[MemoryMetadata]:
         project = _require_str(args.get("project"), field="project")
         return builtins.list(self._store.list(project))
@@ -277,11 +251,10 @@ class ToolsRegistry:
 
 
 ToolsRegistry._dispatch = {
-    "int.add": ToolsRegistry._add,
-    "int.delete": ToolsRegistry._delete,
-    "int.search": ToolsRegistry._search,
-    "int.list": ToolsRegistry._list,
-    "int.read": ToolsRegistry._read,
+    "add": ToolsRegistry._add,
+    "delete": ToolsRegistry._delete,
+    "search": ToolsRegistry._search,
+    "list": ToolsRegistry._list,
 }
 
 
