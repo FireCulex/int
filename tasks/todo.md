@@ -40,8 +40,8 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
   - Scope: M
 
 - [x] **Task 5: Qdrant store (`int/store.py`)**
-  - Acceptance: `QdrantStore` exposes `add(memory, embedding) -> UUID`, `delete(uuid) -> bool`, `search(project, query_vec, limit) -> list[SearchResult]`, `list(project) -> list[Memory]` (metadata only, no content, no embedding call), `read(project, query_vec, limit) -> list[SearchResult]`. Project filter applied on every search/read. Collection auto-created on first use with the configured dimension; startup asserts an existing collection's dimension matches `GEMINI_EMBEDDING_DIMENSIONS` and fails fast on mismatch. `delete` on a missing id returns `False` (idempotent).
-  - Verify: `uv run pytest tests/unit/test_store.py` with a fake Qdrant client covers all five methods + project filtering + dimension fail-fast + idempotent delete. `uv run mypy int` passes.
+  - Acceptance: `QdrantStore` exposes `add(memory, embedding) -> UUID`, `delete(uuid) -> bool`, `search(project, query_vec, limit) -> list[SearchResult]`, `list(project) -> list[Memory]` (metadata only, no content, no embedding call). Project filter applied on every search. Collection auto-created on first use with the configured dimension; startup asserts an existing collection's dimension matches `GEMINI_EMBEDDING_DIMENSIONS` and fails fast on mismatch. `delete` on a missing id returns `False` (idempotent).
+  - Verify: `uv run pytest tests/unit/test_store.py` with a fake Qdrant client covers the four methods + project filtering + dimension fail-fast + idempotent delete. `uv run mypy int` passes.
   - Dependencies: Tasks 2, 3
   - Files: `int/store.py`, `tests/unit/test_store.py`
   - Scope: M
@@ -62,7 +62,7 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
 ## Phase 3 — MCP Server + Tools
 
 - [x] **Task 7: MCP tool definitions (`int/tools.py`) — spike + implement**
-  - Acceptance: First a 10-line spike confirms the pinned `mcp` SDK version supports Streamable HTTP. Then the five tools are defined: `int.add`, `int.delete`, `int.search`, `int.list`, `int.read`. Each tool validates inputs via Pydantic, calls `Embedder` + `QdrantStore`, and returns the spec's output shapes. `list` returns metadata only (no content, no embedding call). `read` is a thin pass-through to `search` with a higher default limit.
+  - Acceptance: First a 10-line spike confirms the pinned `mcp` SDK version supports Streamable HTTP. Then the four tools are defined: `add`, `delete`, `search`, `list` (bare names; the MCP server's name `int` namespaces them via the MCP client). Each tool validates inputs via Pydantic, calls `Embedder` + `QdrantStore`, and returns the spec's output shapes. `list` returns metadata only (no content, no embedding call). (`read` was originally specified as a thin pass-through to `search` but was dropped from v1 — see the post-ship schema-break reduction in repo history.)
   - Verify: `uv run pytest tests/unit/test_tools.py` covers each tool's signature, shape, and error paths (missing project, empty content, bad UUID). `uv run mypy int` passes.
   - Dependencies: Tasks 4, 5
   - Files: `int/tools.py`, `tests/unit/test_tools.py`
@@ -75,7 +75,7 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
   - Files: `int/server.py`, `tests/unit/test_server.py`
   - Scope: M
   - Done: 14 unit tests cover auth (401 on missing/wrong key, exempted `/healthz`),
-    tools/list exposes all five tools with proper named-parameter inputSchema
+    tools/list exposes all four tools with proper named-parameter inputSchema
     (synthesized `inspect.Signature` so FastMCP advertises `project`/`type`/...
     instead of a `kwargs` bag), each tool's success + typed-error envelope,
     no-bare-500 invariant, masking-flag state. Tests drive the FastAPI lifespan
@@ -88,18 +88,18 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
     in Task 4 and reformats existing files to match `ruff format`.
 
 - [x] **Task 9: E2E — live server over HTTP**
-  - Acceptance: E2E test spins the server + Qdrant (via compose or testcontainers), connects a real MCP client over HTTP with the correct `API_KEY`, and exercises all five tools end-to-end. Auth check: missing/wrong `API_KEY` → 401 on every tool. Offline-degrade check: when Gemini is unreachable (mock raised), `add`/`search`/`read` return `EmbeddingError` (not a crash); `list` still works without embedding.
+  - Acceptance: E2E test spins the server + Qdrant (via compose or testcontainers), connects a real MCP client over HTTP with the correct `API_KEY`, and exercises all four tools end-to-end. Auth check: missing/wrong `API_KEY` → 401 on every tool. Offline-degrade check: when Gemini is unreachable (mock raised), `add`/`search` return `EmbeddingError` (not a crash); `list` still works without embedding.
   - Verify: `uv run pytest tests/e2e/test_server_live.py` passes against the live stack.
   - Dependencies: Task 8
   - Files: `tests/e2e/test_server_live.py`, `tests/conftest.py` (add e2e fixtures)
   - Scope: M
-  - Done: 13 tests covering (1) all five tools via the real MCP `streamablehttp_client`
+  - Done: 13 tests covering (1) all four tools via the real MCP `streamablehttp_client`
     + `ClientSession` against a `uvicorn.Server` on a free loopback port (
     `tools/list`, `add`→`list` roundtrip, `add`→`search` roundtrip, idempotent
-    `delete`, `read` pass-through), (2) auth (`missing` / `wrong` / `empty`
+    `delete`), (2) auth (`missing` / `wrong` / `empty`
     `API_KEY` → 401 AuthError at the HTTP layer, on `initialize`, `tools/list`,
     and `tools/call`), (3) offline-degrade (`_BrokenEmbedder` always raises
-    `EmbeddingError`; `add`/`search`/`read` return `isError=True` with the
+    `EmbeddingError`; `add`/`search` return `isError=True` with the
     embedding-error message; `list` still succeeds), and (4) a real-Qdrant
     end-to-end CRUD test driven through a live MCP client over real HTTP.
     `loopback_http_available` session fixture probes whether Python can
@@ -116,8 +116,8 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
 ## Phase 4 — CLI + Docker + Docs
 
 - [x] **Task 10: `int-cli` (`int_cli/main.py`)**
-  - Acceptance: Typer CLI with five commands (`add`, `delete`, `search`, `list`, `read`) matching the spec's tool surface. Each calls the server over HTTP with the `API_KEY` header; reads `SERVER_IP` and `API_KEY` from env. Responses parsed via the shared Pydantic models. Output is human-readable; `search` shows ranked results with score; `list` shows metadata only.
-  - Verify: `uv run int-cli --help` lists all five commands; `uv run pytest tests/unit/test_cli.py` covers argument parsing and HTTP envelope (server mocked). `uv run mypy int` and `uv run mypy int_cli` pass.
+  - Acceptance: Typer CLI with four commands (`add`, `delete`, `search`, `list`) matching the spec's tool surface. Each calls the server over HTTP with the `API_KEY` header; reads `SERVER_IP` and `API_KEY` from env. Responses parsed via the shared Pydantic models. Output is human-readable; `search` shows ranked results with score; `list` shows metadata only.
+  - Verify: `uv run int-cli --help` lists all four commands; `uv run pytest tests/unit/test_cli.py` covers argument parsing and HTTP envelope (server mocked). `uv run mypy int` and `uv run mypy int_cli` pass.
   - Dependencies: Task 7 (tool shapes / shared models)
   - Files: `int_cli/main.py`, `tests/unit/test_cli.py`, entry-point configured in `pyproject.toml`
   - Scope: M
@@ -125,7 +125,7 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
     notifications/initialized -> tools/call) with typed error categories
     (CliConfigError=2 / CliAuthError=3 / CliConnectionError=4 /
     CliRemoteError=5) and an injectable `_opener` for tests.
-    `int_cli/main.py` exposes five Typer commands. The `list` command is
+    `int_cli/main.py` exposes four Typer commands. The `list` command is
     defined as `def list_cmd` with `@app.command("list")` so the Python
     builtin `list` stays usable in the module's type annotations.
     `int-cli` talks the same MCP Streamable HTTP transport as OpenCode,
@@ -133,7 +133,7 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
     (default `http://localhost:8000/mcp`) + `API_KEY` (required);
     `--server-url` and `--api-key` flags override per invocation. Output is
     human-readable: `add` prints the new UUID, `delete` prints `true`/`false`,
-    `search`/`read` print ranked rows (`rank. score=X.XXXX type=… id=…` +
+    `search` prints ranked rows (`rank. score=X.XXXX type=… id=…` +
     a truncated content snippet), `list` prints metadata rows
     (`created_at  type  id`, no content). 16 unit tests cover argument
     parsing, env resolution (default/override/explicit-wins), each
@@ -158,8 +158,8 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
     with no `.env`. `int` depends_on `qdrant: condition: service_healthy`.
     Verified end-to-end: `docker compose up -d` brings both services to
     `healthy`, `GET /healthz` returns `{"status":"ok"}`, and a manual MCP
-    `initialize` + `tools/list` over `/mcp/` advertises all five tools
-    (`int.add`/`int.delete`/`int.search`/`int.list`/`int.read`) with the
+    `initialize` + `tools/list` over `/mcp/` advertises all four tools
+    (`add`/`delete`/`search`/`list`) with the
     correct inputSchema. Bug fix during this task: `_VectorParams` shim in
     `int/store.py` didn't satisfy `qdrant_client`'s real validation when
     the server actually called `create_collection` against live Qdrant —
@@ -205,7 +205,7 @@ Ordered by dependency. Each task completes in a single focused session. Run `uv 
 
 ### Checkpoint: Complete
 - [x] `docker compose up` from a clean clone brings up server + Qdrant within 60s on a warm cache
-- [x] `int-cli` reaches all five tools against the Docker stack
+- [x] `int-cli` reaches all four tools against the Docker stack
 - [x] Fresh-clone hygiene: `docker compose up && uv run pytest` works with no `.env` present (only `.env.example`); no secrets committed
 - [x] Every success criterion from `docs/spec.md` has a green test backing it
 - [x] Gate passes

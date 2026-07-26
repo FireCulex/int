@@ -62,11 +62,12 @@ the shell that launches OpenCode:
 export API_KEY="<the same value you set in .env>"
 ```
 
-Restart OpenCode (or run `opencode mcp list`) and you should see all five
-`int.*` tools (`int.add`, `int.delete`, `int.search`, `int.list`,
-`int.read`) available to the agent. The repo's `AGENTS.md` already carries
-the "search memory first" policy, so the agent will call `int.search` before
-re-running expensive discovery work in this project.
+Restart OpenCode (or run `opencode mcp list`) and you should see all four
+`int` tools (`add`, `delete`, `search`, `list`) available to the agent
+(namespaced as `int_add`, `int_delete`, `int_search`, `int_list` by the
+MCP client, since the MCP server is registered as `int`). The repo's
+`AGENTS.md` already carries the "search memory first" policy, so the agent
+will call `search` before re-running expensive discovery work in this project.
 
 ### Pointing other MCP clients
 
@@ -103,10 +104,6 @@ uv run int-cli list --project myproj
 
 # Delete by UUID (idempotent — prints 'false' if the id no longer exists)
 uv run int-cli delete --memory-id 550e8400-e29b-41d4-a716-446655440000
-
-# read is a thin pass-through to search in v1 (reserved for future
-# summary+read behavior)
-uv run int-cli read --project myproj --query "tech stack"
 ```
 
 CLI flags override env if you need to talk to a different server or use a
@@ -210,8 +207,8 @@ start.
 ### Embedding outage — graceful behavior
 
 If `GEMINI_API_KEY` is missing/wrong, the Gemini API is rate-limiting, or
-the network can't reach `generativelanguage.googleapis.com`, the three
-operations that need embeddings (`add`, `search`, `read`) all return a
+the network can't reach `generativelanguage.googleapis.com`, the two
+operations that need embeddings (`add`, `search`) both return a
 typed `EmbeddingError` envelope. They do not crash the server.
 
 Crucially, `list` doesn't need an embedding call — it just lists Qdrant
@@ -285,7 +282,7 @@ tests are opt-in via `--run-live` (and require a real `GEMINI_API_KEY`).
 |---|---|
 | `docker compose ps` shows `int` restarting | `docker compose logs int` — most likely `API_KEY` or `GEMINI_API_KEY` is missing from `.env`. |
 | `curl :8000/healthz` → connection refused | The `int` container isn't up, or port 8000 is bound by something else on the host. |
-| OpenCode `int.search` returns `AuthError` | The `API_KEY` env var exported in the shell launching OpenCode doesn't match the server's `API_KEY` in `.env`. |
+| OpenCode `int_search` (tool `search`) returns `AuthError` | The `API_KEY` env var exported in the shell launching OpenCode doesn't match the server's `API_KEY` in `.env`. |
 | `int` logs `Failed to create Qdrant collection` | A prior collection exists at a different dimension. Wipe the volume (`docker compose down -v`) and restart. |
 | All embeddings tools return `EmbeddingError` | Likely a Gemini API issue — check `GEMINI_API_KEY`, quota, network reachability to `generativelanguage.googleapis.com`. |
 | `int-cli` exits 4 (`CliConnectionError`) | `INT_SERVER_URL` is wrong, the server isn't up, or the host can't reach itself on loopback (firewall / WSL2 quirks). |

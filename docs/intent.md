@@ -17,7 +17,7 @@ Supermemory is closed-source and external. `int` exists to give the same capabil
 
 ## Success
 
-An assistant, working in a project, prompted to re-derive something a prior session already discovered, calls `int.search` first and answers from stored memory instead of re-running the discovery. Concretely: given a stored architecture synthesis for a project, a semantic query returns it in the top 3 results.
+An assistant, working in a project, prompted to re-derive something a prior session already discovered, calls `search` first and answers from stored memory instead of re-running the discovery. Concretely: given a stored architecture synthesis for a project, a semantic query returns it in the top 3 results.
 
 ## Constraints
 
@@ -37,7 +37,7 @@ An assistant, working in a project, prompted to re-derive something a prior sess
 | Vector store | Qdrant (separate container) | Author has been burned by Chroma; Qdrant's compose story is simpler |
 | Embeddings | `gemini-embedding-001` via Gemini API | No local model in v1, smaller image; local fallback (`bge-m3`) deferred to v2 |
 | Default dimension | 768 | MRL truncation; minimal MTEB loss vs 3072; configurable via env |
-| Embedding tasks | `RETRIEVAL_DOCUMENT` for `add`, `RETRIEVAL_QUERY` for `search`/`read` | Set by `Embedder` wrapper, never by callers |
+| Embedding tasks | `RETRIEVAL_DOCUMENT` for `add`, `RETRIEVAL_QUERY` for `search` | Set by `Embedder` wrapper, never by callers |
 | Normalization | L2-norm every vector before Qdrant | `gemini-embedding-001` does not auto-normalize non-3072 dims |
 | Auth | Single shared static key (`API_KEY`), header-based | v2 adds real auth |
 | Packaging | Docker, multi-stage; docker-compose for server + Qdrant | |
@@ -53,7 +53,7 @@ An assistant, working in a project, prompted to re-derive something a prior sess
 - **Recommended `type` values:** `architecture`, `preference`, `command`, `learned-pattern`, `conversation`, `error-solution`, `project-config`.
 - **Scoping:** per-project. One Qdrant collection, project carried as a payload field with an indexed filter. Per-project collections are a v2 option.
 - **Lifecycle:** immutable-append. "Edit" = `delete` + `add`. Revisions get a new UUID.
-- **Tool surface (MCP, project-scoped):** `add`, `delete`, `search`, `list`, `read`.
+- **Tool surface (MCP, project-scoped):** `add`, `delete`, `search`, `list`.
 
 ## Capture model
 

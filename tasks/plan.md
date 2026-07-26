@@ -2,7 +2,7 @@
 
 ## Overview
 
-Build a self-hosted, Dockerized, open-source AI memory system. A FastAPI MCP server backed by Qdrant, embedding via the Gemini API (`gemini-embedding-001`), exposed as five project-scoped tools (`add`/`delete`/`search`/`list`/`read`) callable from OpenCode. v1 is single-tenant, no TLS, static-key auth.
+Build a self-hosted, Dockerized, open-source AI memory system. A FastAPI MCP server backed by Qdrant, embedding via the Gemini API (`gemini-embedding-001`), exposed as four project-scoped tools (`add`/`delete`/`search`/`list`) callable from OpenCode. v1 is single-tenant, no TLS, static-key auth.
 
 ## Architecture Decisions
 
@@ -30,7 +30,7 @@ Build a self-hosted, Dockerized, open-source AI memory system. A FastAPI MCP ser
 ### Phase 2: Embedder + Store (the vertical slice: store a memory, search it back)
 
 - [ ] Task 4: Gemini embedder wrapper (`int/embeddings.py`) — task_type baked in, L2-normalize
-- [ ] Task 5: Qdrant store (`int/store.py`) — `add`, `delete`, `search`, `list`, `read`
+- [ ] Task 5: Qdrant store (`int/store.py`) — `add`, `delete`, `search`, `list`
 - [ ] Task 6: Embedder + store integration test against real Qdrant (mocked Gemini)
 
 ### Checkpoint: Embedder + Store
@@ -40,9 +40,9 @@ Build a self-hosted, Dockerized, open-source AI memory system. A FastAPI MCP ser
 
 ### Phase 3: MCP server + tools (the vertical slice: callable from an MCP client)
 
-- [ ] Task 7: MCP tool definitions (`int/tools.py`) — the five tools, project-scoped
+- [ ] Task 7: MCP tool definitions (`int/tools.py`) — the four tools, project-scoped
 - [ ] Task 8: FastAPI server + MCP mount (`int/server.py`) with `API_KEY` auth + typed errors
-- [ ] Task 9: E2E test — spin server, call all five tools over HTTP with a real MCP client
+- [ ] Task 9: E2E test — spin server, call all four tools over HTTP with a real MCP client
 
 ### Checkpoint: MCP server
 - [ ] E2E test passes end-to-end against live server + Qdrant
@@ -51,13 +51,13 @@ Build a self-hosted, Dockerized, open-source AI memory system. A FastAPI MCP ser
 
 ### Phase 4: CLI + Docker + docs (operational layer)
 
-- [ ] Task 10: `int-cli` (`int_cli/main.py`) — five commands over HTTP
+- [ ] Task 10: `int-cli` (`int_cli/main.py`) — four commands over HTTP
 - [ ] Task 11: Dockerfile (multi-stage) + docker-compose.yml (int server + Qdrant) + `.env.example`
 - [ ] Task 12: `docs/deployment.md` (run, configure OpenCode, common pitfalls)
 
 ### Checkpoint: Complete
 - [ ] `docker compose up` from a clean clone brings up server + Qdrant within 60s on warm cache
-- [ ] `int-cli` reaches all five tools against the Docker stack
+- [ ] `int-cli` reaches all four tools against the Docker stack
 - [ ] Fresh-clone hygiene: `docker compose up && uv run pytest` works with no `.env` present
 - [ ] Ready for review
 

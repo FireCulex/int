@@ -33,13 +33,16 @@ See `docs/deployment.md` for full setup, CLI usage, and common pitfalls.
 
 ## Tools
 
+Tool names are bare (`add`, `search`, ...). The MCP server is registered as
+`int`, so MCP clients expose them as `int_add`, `int_search`, `int_list`,
+`int_delete`.
+
 | Tool | Inputs | Output |
 |---|---|---|
-| `int.add` | `project`, `type`, `content` | `memory_id` |
-| `int.delete` | `memory_id` | `deleted: bool` |
-| `int.search` | `project`, `query`, `limit=5` | ranked `SearchResult[]` |
-| `int.list` | `project` | metadata-only `Memory[]` |
-| `int.read` | `project`, `query`, `limit=5` | ranked `SearchResult[]` |
+| `add` | `project`, `type`, `content` | `memory_id` |
+| `delete` | `memory_id` | `deleted: bool` |
+| `search` | `project`, `query`, `limit=5` | ranked `SearchResult[]` |
+| `list` | `project` | metadata-only `Memory[]` |
 
 ## Stack
 

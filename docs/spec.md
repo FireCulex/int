@@ -8,7 +8,7 @@ A self-hosted, Dockerized, open-source AI memory system — a local-first altern
 
 **Primary user:** the maintainer, running it locally inside OpenCode.
 **Secondary users:** GitHub contributors who self-host their own instance.
-**Success:** an assistant working in a project, prompted with "what's the tech stack here?", calls `int.search` first, hits a stored synthesis from a prior session, and answers without reading a single file.
+**Success:** an assistant working in a project, prompted with "what's the tech stack here?", calls `search` first, hits a stored synthesis from a prior session, and answers without reading a single file.
 
 ## Tech Stack
 
@@ -21,7 +21,7 @@ A self-hosted, Dockerized, open-source AI memory system — a local-first altern
 | Vector store | Qdrant (separate container in compose) |
 | Embeddings | `gemini-embedding-001` via Gemini API (`google-genai` SDK) |
 | Default dimension | 768 (MRL truncation of 3072; configurable via `GEMINI_EMBEDDING_DIMENSIONS`) |
-| Embedding tasks | `RETRIEVAL_DOCUMENT` for `add`; `RETRIEVAL_QUERY` for `search`/`read` (`list` needs no embedding) |
+| Embedding tasks | `RETRIEVAL_DOCUMENT` for `add`; `RETRIEVAL_QUERY` for `search` (`list` needs no embedding) |
 | Normalization | L2-normalize every vector in `int/embeddings.py` before Qdrant (`gemini-embedding-001` does not auto-normalize non-3072 dims) |
 | Auth | Static shared key (`API_KEY`), header-based. No encryption in v1. |
 | Packaging | Docker, multi-stage build; `docker-compose` for server + Qdrant |
@@ -52,7 +52,6 @@ uv run int-cli add    --project <p> --type architecture --content "..."
 uv run int-cli search --project <p> --query "tech stack"
 uv run int-cli list   --project <p>
 uv run int-cli delete --memory-id <uuid>
-uv run int-cli read   --project <p> --query "..."
 ```
 
 Gate (must pass before any commit): `uv run ruff check && uv run mypy int && uv run pytest`
@@ -80,9 +79,9 @@ int/                                # repo root
 │   ├── server.py                    # FastAPI app + MCP server (Streamable HTTP transport)
 │   ├── config.py                    # env var loading (pydantic-settings)
 │   ├── embeddings.py                # Gemini embedding client; bakes in task_type + L2 norm
-│   ├── store.py                     # Qdrant client wrapper: add/delete/search/list/read
+│   ├── store.py                     # Qdrant client wrapper: add/delete/search/list
 │   ├── models.py                    # Pydantic types: Memory, SearchResult, etc.
-│   └── tools.py                     # MCP tool definitions (the 5 tool surface)
+│   └── tools.py                     # MCP tool definitions (the 4 tool surface)
 ├── int_cli/                         # dev/ops CLI for manual inspection
 │   ├── __init__.py
 │   └── main.py                      # Typer/Click CLI; calls server over HTTP
@@ -134,7 +133,7 @@ class Embedder:
         return await self._embed(content, "RETRIEVAL_DOCUMENT")
 
     async def embed_query(self, content: str) -> list[float]:
-        # Used by `search`/`read`. task_type=RETRIEVAL_QUERY.
+        # Used by `search`. task_type=RETRIEVAL_QUERY.
         return await self._embed(content, "RETRIEVAL_QUERY")
 
     async def _embed(self, content: str, task_type: str) -> list[float]:
@@ -169,15 +168,14 @@ Conventions:
 
 ## API Surface — MCP Tools (v1)
 
-All tools are project-scoped. All inputs validated at the MCP boundary; raise typed exceptions → translated to MCP error responses.
+All tools are project-scoped. All inputs validated at the MCP boundary; raise typed exceptions → translated to MCP error responses. Tool names are bare (`add`, `search`, ...) — the MCP server's name (`int`) already namespaces them, so MCP clients expose them as `int_add`, `int_search`, etc.
 
 | Tool | Inputs | Output | Description |
 |---|---|---|---|
-| `int.add` | `project: str`, `type: str`, `content: str` | `memory_id: str` (UUID) | Embed content as `RETRIEVAL_DOCUMENT`, store in Qdrant, return new ID. |
-| `int.delete` | `memory_id: str` | `deleted: bool` | Remove a memory by ID. Idempotent on missing (returns `false`). |
-| `int.search` | `project: str`, `query: str`, `limit: int = 5` | `list[SearchResult]` (content, score, id, type) | Embed query as `RETRIEVAL_QUERY`, cosine search Qdrant filtered by `project`. |
-| `int.list` | `project: str` | `list[Memory]` (id, type, created_at; **no content**) | List memories in a project — metadata only, no embedding call, no content returned. |
-| `int.read` | `project: str`, `query: str`, `limit: int = 5` | `list[SearchResult]` (same as `search`) | Alias for `search` with higher limit. Reserved for future "summary + search" behavior; v1 is a thin pass-through. |
+| `add` | `project: str`, `type: str`, `content: str` | `memory_id: str` (UUID) | Embed content as `RETRIEVAL_DOCUMENT`, store in Qdrant, return new ID. |
+| `delete` | `memory_id: str` | `deleted: bool` | Remove a memory by ID. Idempotent on missing (returns `false`). |
+| `search` | `project: str`, `query: str`, `limit: int = 5` | `list[SearchResult]` (content, score, id, type) | Embed query as `RETRIEVAL_QUERY`, cosine search Qdrant filtered by `project`. |
+| `list` | `project: str` | `list[Memory]` (id, type, created_at; **no content**) | List memories in a project — metadata only, no embedding call, no content returned. |
 
 **Auth:** every tool call requires `API_KEY` header matching server's `API_KEY`. Missing/mismatched → 401.
 
@@ -218,7 +216,7 @@ Loaded via `int/config.py` (pydantic-settings). Fail-fast on missing required va
 
 **Hard test invariants:**
 - Every vector written to Qdrant has `norm == 1.0` within float tolerance. Assertion on every `add`.
-- Every `search`/`read` result respects the `project` filter — zero cross-project leaks. Integration test stores in A, queries B, asserts empty.
+- Every `search` result respects the `project` filter — zero cross-project leaks. Integration test stores in A, queries B, asserts empty.
 
 ## Boundaries
 
@@ -232,7 +230,7 @@ Loaded via `int/config.py` (pydantic-settings). Fail-fast on missing required va
 
 **Ask first:**
 - Swapping the embedding model or changing the collection dimension (silently invalidates stored vectors).
-- Adding a new MCP tool outside v1's five (`add`/`delete`/`search`/`list`/`read`).
+- Adding a new MCP tool outside v1's four (`add`/`delete`/`search`/`list`).
 - Adding any dependency to `pyproject.toml`.
 - Changing the docker-compose service topology (e.g. embedding Qdrant in the server container).
 - Introducing auth beyond the static shared key.
@@ -249,14 +247,14 @@ Loaded via `int/config.py` (pydantic-settings). Fail-fast on missing required va
 
 Specific, testable — every line maps to a verification:
 
-1. **Five-tool MCP surface works.** `add`, `delete`, `search`, `list`, `read` are all callable from an MCP client against the running server. `search` returns ranked results; `list` returns metadata without content.
+1. **Four-tool MCP surface works.** `add`, `delete`, `search`, `list` are all callable from an MCP client against the running server. `search` returns ranked results; `list` returns metadata without content.
 2. **Project scoping is enforced.** `search` on project A returns zero hits from project B's stored memories. Stored as a Qdrant payload field with an indexed filter.
 3. **Recall without re-discovery.** Given a stored architecture synthesis for a project, a semantic query returns it in the top 3 results with cosine similarity ≥ 0.6. Verified by an integration test using a representative synthesis as fixture content.
 4. **Single container dependency.** `docker compose up` from a clean clone brings up a working server + Qdrant within 60s on a warm cache. First-run (incl. Docker image pull) ≤ 5 min.
 5. **Env-driven config verified.** Changing `GEMINI_EMBEDDING_DIMENSIONS` creates a new Qdrant collection with that size; changing `API_KEY` rejects clients using the old key. Both covered by integration tests.
-6. **Offline-degrade is explicit.** If `GEMINI_API_KEY` is missing or the API is unreachable, `add`/`search`/`read` return a typed `EmbeddingError` (not a crash). `list` (no embedding needed) still works.
+6. **Offline-degrade is explicit.** If `GEMINI_API_KEY` is missing or the API is unreachable, `add`/`search` return a typed `EmbeddingError` (not a crash). `list` (no embedding needed) still works.
 7. **AGENTS.md policy is in place.** The repo's `AGENTS.md` contains the search-first rule and a salience policy ("save when the cost to re-discover > cost to save"). Read-only check.
-8. **CLI inspection works.** All five operations reachable from `int-cli` for debugging/operational access without an MCP client.
+8. **CLI inspection works.** All four operations reachable from `int-cli` for debugging/operational access without an MCP client.
 9. **Public repo hygiene.** `docker compose up && uv run pytest` works from a fresh clone. No `.env` present in git; `.env.example` documented.
 10. **Embeddings are L2-normalized.** Every vector in Qdrant has `norm == 1.0` within float tolerance. Asserted in every integration test that calls `add` + `search`.
 
