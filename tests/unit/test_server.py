@@ -35,6 +35,7 @@ from httpx import ASGITransport, AsyncClient
 class FakeStore:
     def __init__(self) -> None:
         self.memories: dict[Any, tuple[str, str, str]] = {}
+        self.search_calls: list[tuple[str, list[float], int]] = []
 
     def ensure_collection(self) -> None:
         return None
@@ -49,6 +50,7 @@ class FakeStore:
     def search(self, project: str, *, query_vector: list[float], limit: int = 5) -> list[Any]:
         from int.models import SearchResult
 
+        self.search_calls.append((project, list(query_vector), limit))
         return [
             SearchResult(id=uuid4(), type="architecture", content="canned", score=0.9),
         ][:limit]
@@ -235,6 +237,62 @@ async def test_tools_exposed_at_mcp_endpoint_with_correct_names(
         "search",
         "list",
     }
+
+
+@pytest.mark.asyncio
+async def test_search_tool_advertises_integer_limit_with_default_five(
+    client: AsyncClient,
+) -> None:
+    """Regression for the `annotation=str` bug in _build_mcp_fast.
+
+    FastMCP derives its input schema from the synthesized function's parameter
+    annotations. When every parameter was force-annotated `str`, FastMCP
+    advertised `limit` as `{"type": "string"}` and rejected integer input
+    with a Pydantic `string_type` error before our handler ran. The
+    descriptor already declares `{"type": "integer", "default": 5}`; the MCP
+    schema must reflect that so integer-typed clients (and OpenCode) can
+    pass `limit: 3` without a transport-level validation failure.
+    """
+    await _init_session(client)
+    body = await _call(client, id_=1, method="tools/list")
+    assert "result" in body, body
+    tools = body["result"].get("tools", [])
+    search = next((t for t in tools if t["name"] == "search"), None)
+    assert search is not None, "search tool not registered"
+    props = search["inputSchema"].get("properties", {})
+    limit_schema = props.get("limit", {})
+    assert limit_schema.get("type") == "integer", limit_schema
+    assert limit_schema.get("default") == 5, limit_schema
+
+
+@pytest.mark.asyncio
+async def test_search_tool_integer_limit_reaches_store(
+    client: AsyncClient, app: Any,
+) -> None:
+    """End-to-MCP-store check: an integer `limit` argument flows through
+    FastMCP's Pydantic layer and our registry, reaching the store at the
+    original integer value. Before the fix this raised a Pydantic
+    `string_type` validation error before the registry saw anything.
+    """
+    await _init_session(client)
+    body = await _call(
+        client,
+        id_=1,
+        method="tools/call",
+        params={
+            "name": "search",
+            "arguments": {"project": "p", "query": "q", "limit": 3},
+        },
+    )
+    # No transport-level validation error -> we got an MCP result envelope.
+    assert "error" not in body, body
+    assert "result" in body, body
+    assert body["result"].get("isError") is False, body
+    store = app.state.store
+    assert store.search_calls, "search did not reach the store"
+    _, _, limit_seen = store.search_calls[-1]
+    assert limit_seen == 3
+    assert isinstance(limit_seen, int)
 
 
 # --- add via HTTP/MCP ---

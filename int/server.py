@@ -131,6 +131,14 @@ def _build_mcp_fast(tools: Any) -> Any:
     `kwargs` bag. FastMCP infers the input schema from the function signature,
     so we attach an `inspect.Signature` whose parameters match the descriptor.
 
+    Annotations are mapped from the descriptor's JSON-schema `type` (integer,
+    number, boolean -> int / float / bool; everything else -> str) so FastMCP
+    advertises the correct parameter type and accepts the native Python value
+    our registry's `_require_*` validators expect. Hardcoding `annotation=str`
+    for every parameter caused FastMCP to advertise `limit` as `type: string`
+    and reject integer input with a Pydantic `string_type` error --
+    contradicting the registry's own `_require_int_in_range` which rejects strings.
+
     Wrapping logic translates every typed exception raised by the registry
     into a plain `ToolError` (caught by FastMCP and returned as an
     `isError=True` envelope) -- never a bare HTTP 500.
@@ -138,6 +146,15 @@ def _build_mcp_fast(tools: Any) -> Any:
     import inspect
 
     from mcp.server.fastmcp import FastMCP
+
+    # JSON-schema primitive type -> Python annotation. Unknown / missing types
+    # default to str (the common case for our v1 descriptors).
+    schema_type_map: dict[str, Any] = {
+        "integer": int,
+        "number": float,
+        "boolean": bool,
+        "string": str,
+    }
 
     mcp = FastMCP("int")
     ts = mcp.settings.transport_security
@@ -213,7 +230,10 @@ def _build_mcp_fast(tools: Any) -> Any:
                 default = prop_schema["default"]
             else:
                 default = None
-            params.append(inspect.Parameter(prop_name, kind, default=default, annotation=str))
+            annotation = schema_type_map.get(prop_schema.get("type", "string"), str)
+            params.append(
+                inspect.Parameter(prop_name, kind, default=default, annotation=annotation)
+            )
         handler.__signature__ = inspect.Signature(params)  # type: ignore[attr-defined]
         return handler
 
