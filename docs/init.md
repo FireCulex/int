@@ -41,12 +41,12 @@ are about. Run init rarely; run search always.
 | Semantic recall | `search(project, query, limit=5)` | Ranked hits, content included. |
 | List metadata | `list(project)` | Metadata only (no content, no embedding call). Use for pre-flight. |
 
-Notes for readers coming from Supermemory's `/init`:
+A few things worth calling out explicitly, since they trip people up:
 
 - **No `scope`.** `int` is single-tenant and scopes by the `project` field. There is no
   user-scope persistence in v1; do not invent one.
-- **No `mode`.** Each operation is its own tool — no `supermemory(mode: "add", …)`
-  pseudo-call. Use the actual tool.
+- **No `mode`.** Each operation is its own tool — there's no single pseudo-call with a
+  `mode` parameter switching between add/delete/search/list. Use the actual tool.
 - **`type` is a free string** with a recommended enum (not enforced): `architecture`,
   `preference`, `command`, `learned-pattern`, `conversation`, `error-solution`,
   `project-config`. Pick from the enum when it fits; only invent a new tag if a clear,
@@ -81,42 +81,55 @@ Ask at most two, one at a time, only if the answer isn't already obvious from
 
 Skip this entirely if the project is well-documented or the user has already said.
 
-### 2. Deep research
+### 2. Map the codebase
 
-Goal: genuinely understand the project, not collect surface facts. Cross-reference
-findings; resolve ambiguities; read actual file contents, not just names; look for
-patterns in history that reveal workflow. Think like a new team member on day one.
+Goal: leave with a mental model good enough that you could hand this project to
+someone else and have them be productive by lunch. Facts without relationships
+between them don't survive to a future session — a stack list is not an architecture,
+and a file tree is not an understanding.
 
-**Parallel explore fan-out** (launch concurrently):
+Work in three passes. Each pass answers a different kind of question; don't collapse
+them into one grep-and-done sweep.
 
-```
-Task(explore, "What is the tech stack and key dependencies?")
-Task(explore, "What is the project structure? Key directories?")
-Task(explore, "How do you build, test, lint, and run this project?")
-Task(explore, "What are the main architectural patterns and data flow?")
-Task(explore, "What conventions, boundaries, or gotchas are documented?")
-```
+**Pass 1 — Shape.** What is this, structurally?
 
-**File-based** (read in parallel where possible):
+- Manifests (`pyproject.toml`, `package.json`, `Cargo.toml`, `go.mod`, ...) for
+  language, runtime, and the dependency graph — not just names, note *why* a
+  non-obvious dependency is there if a comment or commit explains it.
+- Directory layout: where does logic live vs config vs tests vs generated code.
+  Note anything that violates the "obvious" convention for this language/framework.
+- Entry points: how does this actually start running (main, server bootstrap, CLI
+  dispatch)?
 
-- `README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`.
-- Package manifests: `pyproject.toml`, `package.json`, `Cargo.toml`, `go.mod`, etc.
-- Config: `tsconfig.json`, `.eslintrc`, `ruff.toml`, `.prettierrc`, `mypy.ini`.
-- CI: `.github/workflows/`, `Makefile`, `Justfile`.
-- Project-specific docs (`docs/intent.md`, `docs/spec.md`, `docs/deployment.md`).
+**Pass 2 — Operation.** How does someone actually work in this repo day to day?
 
-**Git-based:**
+- Build/test/lint/run commands — pull real ones from CI config or `Makefile`/
+  `Justfile` rather than guessing from the framework's defaults; projects deviate.
+- Local dev setup: env vars, containers, seed data, anything that would break a
+  fresh clone if skipped.
+- Gate sequence before a commit is allowed to land, if one exists.
 
-```bash
-git log --oneline -20              # recent history
-git branch -a                      # branching strategy
-git log --format="%s" -50          # commit conventions
-git shortlog -sn --all | head -10  # main contributors
-```
+**Pass 3 — History and intent.** Why does it look the way it does?
 
-Patterns to look for in history: gate-commands run before commit, conventional-commit
-shape, who owns which subsystem, recurring bug-fix areas (pain points), refactors that
-moved code between modules.
+- `git log --format="%s" -50` for commit-message conventions and cadence.
+- `git shortlog -sn --all | head -10` for who owns what — useful for knowing whose
+  code a change is likely to intersect with.
+- Skim recent merges for refactors: code that moved, got renamed, or got split
+  reveals what the *previous* shape was and why it stopped working. That's usually
+  worth more than the current shape alone.
+- Directories or files with a disproportionate share of bug-fix commits — these are
+  the parts of the system that bite people. Flag them.
+- Any doc that states intent explicitly (`AGENTS.md`, `docs/design.md`, ADRs) — read
+  these fully, don't skim; they're the highest-density source in the repo.
+
+Read files, don't just list them. A directory tree tells you nothing a memory needs;
+the actual content of the three files that matter is worth more than filenames from
+three hundred.
+
+**Cross-check before moving on.** If two sources disagree — the README says one test
+command, CI runs another — that disagreement is itself worth a memory (`type:
+error-solution` or `learned-pattern`, whichever fits), not something to silently
+resolve in favor of whichever you found first.
 
 ### 3. Save incrementally, with recall-before-save
 
@@ -134,6 +147,19 @@ session is interrupted. For each candidate insight:
    the *why* when it isn't obvious; the *what* alone ages badly.
 3. **Type it.** Pick from the enum; only invent a tag if a clear recurring pattern
    demands it.
+
+**Don't skip negative facts.** When a function conspicuously does *not* do something a
+sibling function does — "X clears these fields on call, Y does not, even though Y is
+called in a similar context" — that omission is its own insight and won't be inferable
+from a positive-only description of what X does. These are cheap to miss during
+research (they require noticing an absence, not a presence) and expensive to
+rediscover later, since nothing about "what the code does" will surface "what it
+doesn't do." If a research pass turns one up, save it explicitly rather than folding
+it as a caveat into the memory about the function it's missing from.
+
+**Include exact line numbers in `error-solution` memories** when a bug is tied to
+specific functions. A memory that names the bug but not where it lives still costs a
+grep + read to relocate before it can be acted on.
 
 **Type guidance:**
 
@@ -196,7 +222,7 @@ Confirm before reporting done:
 | "Edit means add a new one alongside the old." | No. `delete` the old UUID first, then `add`. Otherwise you leave stale duplicates that pollute `search`. |
 | "I'll batch all the adds at the end — cleaner." | Save incrementally. An interrupted session should still have the first half of the synthesis persisted. |
 | "This is just one project's quirks, no need to type it carefully." | Future `search` retrieves by the *content*, but you'll filter and triage by `type`. Mis-typed memories are quietly invisible when you need them. |
-| "I'll copy Supermemory's `/init` verbatim, it's close enough." | Don't. `int` has no `scope`/`mode`, the tool names differ, and there is no user-scope in v1. Use the map above. |
+| "I'll just wing the tool calls, they're probably close to what I've seen elsewhere." | Don't assume. `int` has no `scope`/`mode`, and the tool names are specific — check the tool-surface map above before calling anything. |
 
 ## Red flags
 
