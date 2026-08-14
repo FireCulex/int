@@ -157,6 +157,7 @@ class FakeQdrantClient:
         collection_name: str,
         scroll_filter: dict[str, Any] | None = None,
         limit: int = 100,
+        offset: int | None = None,
         with_payload: bool = True,
         with_vectors: bool = False,
     ) -> Any:
@@ -167,6 +168,7 @@ class FakeQdrantClient:
                     "collection_name": collection_name,
                     "filter": scroll_filter,
                     "limit": limit,
+                    "offset": offset,
                     "with_payload": with_payload,
                     "with_vectors": with_vectors,
                 },
@@ -181,16 +183,18 @@ class FakeQdrantClient:
                     project = cond.get("match", {}).get("value")
         if project is not None:
             pts = [p for p in pts if p.payload.get("project") == project]
-        pts = pts[:limit]
+        start = offset or 0
+        window = pts[start : start + limit]
+        next_offset = start + len(window) if start + len(window) < len(pts) else None
 
         items = []
-        for p in pts:
+        for p in window:
             attrs: dict[str, Any] = {"id": p.id, "payload": dict(p.payload)}
             if with_vectors:
                 attrs["vector"] = list(p.vector)
             _point_cls = type("Point", (), attrs)
             items.append(_point_cls())
-        return (items, None)
+        return (items, next_offset)
 
 
 class _QdrantCollectionMissing(Exception):  # noqa: N818 - mirrors an SDK signal
@@ -435,3 +439,41 @@ def test_score_reported_is_cosine_similarity() -> None:
     expected = _cos(stored_vec, query) / 1  # stored vec isn't normalized in fake; cosine is fine
     results = store.search("p", query_vector=query, limit=5)
     assert results[0].score == pytest.approx(expected, abs=1e-5)
+
+
+# --- project_names ---
+
+
+def test_project_names_returns_sorted_unique_projects() -> None:
+    from int.models import Memory
+
+    store, _ = _make_store(dim=4)
+    store.add(Memory(project="beta", type="t", content="b1"), [1.0, 0.0, 0.0, 0.0])
+    store.add(Memory(project="alpha", type="t", content="a1"), [1.0, 0.0, 0.0, 0.0])
+    store.add(Memory(project="alpha", type="t", content="a2"), [1.0, 0.0, 0.0, 0.0])
+    store.add(Memory(project="gamma", type="t", content="g1"), [1.0, 0.0, 0.0, 0.0])
+    assert store.project_names() == ["alpha", "beta", "gamma"]
+
+
+def test_project_names_empty_when_no_memories() -> None:
+    store, _ = _make_store(dim=4)
+    store.ensure_collection()
+    assert store.project_names() == []
+
+
+def test_project_names_paginates_across_scroll_pages() -> None:
+    from int.models import Memory
+
+    store, client = _make_store(dim=4)
+    for i in range(5):
+        store.add(Memory(project=f"proj{i}", type="t", content=f"c{i}"), [1.0, 0.0, 0.0, 0.0])
+
+    # Force small pages so project_names() must follow the `_next` offset.
+    original_scroll = client.scroll
+
+    def capped(**kwargs: Any) -> Any:
+        kwargs["limit"] = min(kwargs.get("limit") or 1_000, 2)
+        return original_scroll(**kwargs)
+
+    client.scroll = capped
+    assert store.project_names() == ["proj0", "proj1", "proj2", "proj3", "proj4"]

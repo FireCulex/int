@@ -180,9 +180,7 @@ def test_explicit_api_key_wins(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_add_calls_int_add_and_prints_uuid(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    sess = _FakeSession(
-        responses={"add": _CallResult(text="11111111-2222-3333-4444-555555555555")}
-    )
+    sess = _FakeSession(responses={"add": _CallResult(text="11111111-2222-3333-4444-555555555555")})
     _patch_session_with(monkeypatch, sess)
     monkeypatch.setenv("API_KEY", "k")
 

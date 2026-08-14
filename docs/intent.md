@@ -54,6 +54,7 @@ An assistant, working in a project, prompted to re-derive something a prior sess
 - **Scoping:** per-project. One Qdrant collection, project carried as a payload field with an indexed filter. Per-project collections are a v2 option.
 - **Lifecycle:** immutable-append. "Edit" = `delete` + `add`. Revisions get a new UUID.
 - **Tool surface (MCP, project-scoped):** `add`, `delete`, `search`, `list`.
+- **Resource surface (MCP, read-only):** `int://projects` — the sorted project names that have memories (metadata only, no content). Exists so clients can enumerate projects via `list_mcp_resources`/`read_mcp_resource` instead of guessing project names.
 
 ## Capture model
 

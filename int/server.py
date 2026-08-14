@@ -106,7 +106,7 @@ def _default_real_deps(
         dimension=gemini_embedding_dimensions,
     )
     tools = ToolsRegistry(store=store, embedder=embedder)
-    mcp_fast = _build_mcp_fast(tools)
+    mcp_fast = _build_mcp_fast(tools, store=store)
     return _AppDeps(
         api_key=api_key,
         store=store,
@@ -122,7 +122,7 @@ def _import_qdrant_client_cls() -> Any:
     return QdrantClient
 
 
-def _build_mcp_fast(tools: Any) -> Any:
+def _build_mcp_fast(tools: Any, *, store: Any | None = None) -> Any:
     """Build a FastMCP instance whose tool handlers delegate to our registry.
 
     Each tool is registered with an explicit parameter signature derived from
@@ -244,7 +244,32 @@ def _build_mcp_fast(tools: Any) -> Any:
             description=descriptor.description,
         )
 
+    if store is not None:
+        _register_projects_resource(mcp, store)
+
     return mcp
+
+
+def _register_projects_resource(mcp: Any, store: Any) -> None:
+    """Expose the read-only `int://projects` MCP resource.
+
+    Lists the project names that have at least one memory (metadata only; no
+    memory content ever leaves the server through this resource). This is what
+    makes `int` show up in clients' `list_mcp_resources` beyond just
+    advertising the resources *capability*.
+    """
+    import json as _json
+
+    @mcp.resource(  # type: ignore[untyped-decorator]
+        "int://projects",
+        name="int projects",
+        description=(
+            "Projects that have at least one memory. Read-only metadata; no memory content."
+        ),
+        mime_type="application/json",
+    )
+    def _projects() -> str:
+        return _json.dumps({"projects": store.project_names()})
 
 
 class ToolError(Exception):
@@ -289,7 +314,7 @@ def build_app(
         if tools is None:
             tools = ToolsRegistry(store=store, embedder=embedder)
         if mcp_fast is None:
-            mcp_fast = _build_mcp_fast(tools)
+            mcp_fast = _build_mcp_fast(tools, store=store)
 
     if store is None or embedder is None or tools is None or mcp_fast is None:
         if settings is None:

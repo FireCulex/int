@@ -52,6 +52,7 @@ class _QdrantClientLike(Protocol):
         collection_name: str,
         scroll_filter: dict[str, Any] | None,
         limit: int,
+        offset: int | None = None,
         with_payload: bool,
         with_vectors: bool,
     ) -> Any: ...
@@ -232,6 +233,37 @@ class QdrantStore:
                 )
             )
         return metas
+
+    def project_names(self) -> list_alias[str]:
+        """Sorted, de-duplicated project names that have at least one memory.
+
+        Enumerates the whole collection (no project filter) via scroll
+        pagination, reading payloads only (never vectors). Powers the read-only
+        `int://projects` MCP resource. Returns [] when the collection is empty.
+        """
+        self.ensure_collection()
+        names: builtins.set[str] = set()
+        offset: int | None = None
+        try:
+            while True:
+                items, _next = self._client.scroll(
+                    collection_name=self._collection,
+                    scroll_filter=None,
+                    limit=1_000,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for point in items:
+                    project = point.payload.get("project")
+                    if project:
+                        names.add(project)
+                if _next is None:
+                    break
+                offset = _next
+        except Exception as e:
+            raise StoreError(f"Qdrant project_names scroll failed: {e}") from e
+        return builtins.sorted(names)
 
     def _do_search(
         self,

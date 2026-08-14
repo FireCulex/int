@@ -181,6 +181,16 @@ All tools are project-scoped. All inputs validated at the MCP boundary; raise ty
 
 **Error envelope:** typed errors (`EmbeddingError`, `StoreError`, `AuthError`, `ValidationError`) → MCP/HTTP error with code + message. Never bare 500s.
 
+## API Surface — MCP Resources (v1)
+
+The server registers exactly one read-only resource. It exists so MCP clients can enumerate which projects have memories without guessing project names (the store has no list-projects tool). It never exposes memory content.
+
+| URI | MimeType | Read returns |
+|---|---|---|
+| `int://projects` | `application/json` | `{"projects": ["<sorted unique project names>"]}` |
+
+Implemented in `int/server.py::_register_projects_resource`, backed by `QdrantStore.project_names()` (scroll-all over the collection, payloads only, no vectors). Auth: same `API_KEY` header as tools. Note: FastMCP auto-registers the `resources/list` + `resources/read` protocol handlers unconditionally, so the server *advertises* the resources capability even with zero resources registered; `int://projects` is the one actual entry.
+
 ## Env Vars
 
 Loaded via `int/config.py` (pydantic-settings). Fail-fast on missing required values at server startup.
@@ -230,7 +240,7 @@ Loaded via `int/config.py` (pydantic-settings). Fail-fast on missing required va
 
 **Ask first:**
 - Swapping the embedding model or changing the collection dimension (silently invalidates stored vectors).
-- Adding a new MCP tool outside v1's four (`add`/`delete`/`search`/`list`).
+- Adding a new MCP tool outside v1's four (`add`/`delete`/`search`/`list`), or any new MCP resource beyond the single read-only `int://projects` (resources and tools are both MCP surface).
 - Adding any dependency to `pyproject.toml`.
 - Changing the docker-compose service topology (e.g. embedding Qdrant in the server container).
 - Introducing auth beyond the static shared key.

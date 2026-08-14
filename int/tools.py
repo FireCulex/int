@@ -56,6 +56,7 @@ class _StoreLike(Protocol):
         limit: int = 5,
     ) -> builtins.list[SearchResult]: ...
     def list(self, project: str) -> builtins.list[MemoryMetadata]: ...  # noqa: A003
+    def project_names(self) -> builtins.list[str]: ...
 
 
 class _EmbedderLike(Protocol):

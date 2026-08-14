@@ -149,3 +149,26 @@ def test_every_stored_vector_is_l2_normalized(
         v = np.asarray(point.vector, dtype=np.float32)
         norm = float(np.linalg.norm(v))
         assert abs(norm - 1.0) < 1e-5, f"vector {point.id} has norm {norm}"
+
+
+def test_project_names_lists_unique_projects_across_memories(
+    qdrant_container: Any,
+    fake_embedder: Any,
+) -> None:
+    """project_names() returns sorted, de-duplicated project names from the
+    real Qdrant collection — the backing data for the int://projects resource."""
+    from int.models import Memory
+
+    store = _make_real_store(qdrant_container)
+    for project in ("beta", "alpha", "beta", "gamma"):
+        m = Memory(
+            id=uuid.uuid4(),
+            project=project,
+            type="architecture",
+            content=f"memory for {project}",
+            created_at=datetime.now(UTC),
+        )
+        v = fake_embedder.embed_document_sync(m.content)
+        store.add(m, v)
+
+    assert store.project_names() == ["alpha", "beta", "gamma"]

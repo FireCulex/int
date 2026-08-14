@@ -66,6 +66,9 @@ class FakeStore:
             if p == project
         ]
 
+    def project_names(self) -> list[str]:
+        return sorted({p for p, _t, _c in self.memories.values()})
+
 
 class FakeEmbedder:
     async def embed_document(self, content: str) -> list[float]:
@@ -240,6 +243,66 @@ async def test_tools_exposed_at_mcp_endpoint_with_correct_names(
 
 
 @pytest.mark.asyncio
+async def test_projects_resource_listed_at_mcp_endpoint(client: AsyncClient) -> None:
+    """The read-only `int://projects` resource is advertised via resources/list.
+
+    This is what makes int show up meaningfully in opencode's
+    `list_mcp_resources` (previously int advertised the resources *capability*
+    via FastMCP's auto-handlers but registered zero resources).
+    """
+    await _init_session(client)
+    body = await _call(client, id_=1, method="resources/list")
+    assert "result" in body, body
+    resources = body["result"].get("resources", [])
+    uris = {r.get("uri") for r in resources}
+    assert "int://projects" in uris, resources
+    projects = next(r for r in resources if r["uri"] == "int://projects")
+    assert projects.get("mimeType") == "application/json"
+
+
+@pytest.mark.asyncio
+async def test_projects_resource_read_returns_project_names(client: AsyncClient) -> None:
+    """resources/read on int://projects returns sorted project names as JSON.
+
+    Uses a store pre-seeded with memories across two projects to confirm the
+    resource handler reads live store state (metadata only, no content).
+    """
+    store = FakeStore()
+    from int.models import Memory
+
+    store.add(Memory(project="beta", type="t", content="b1"), [1.0])
+    store.add(Memory(project="alpha", type="t", content="a1"), [1.0])
+    store.add(Memory(project="beta", type="t", content="b2"), [1.0])
+    app = _build_app(store=store)
+    async with (
+        LifespanManager(app),
+        AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={
+                "API_KEY": "shared-secret",
+                "Accept": "application/json, text/event-stream",
+            },
+        ) as c,
+    ):
+        await _init_session(c)
+        body = await _call(
+            c,
+            id_=1,
+            method="resources/read",
+            params={"uri": "int://projects"},
+        )
+    assert "result" in body, body
+    contents = body["result"].get("contents", [])
+    assert len(contents) == 1
+    assert contents[0]["mimeType"] == "application/json"
+    text = contents[0]["text"]
+    import json as _json
+
+    assert _json.loads(text) == {"projects": ["alpha", "beta"]}
+
+
+@pytest.mark.asyncio
 async def test_search_tool_advertises_integer_limit_with_default_five(
     client: AsyncClient,
 ) -> None:
@@ -267,7 +330,8 @@ async def test_search_tool_advertises_integer_limit_with_default_five(
 
 @pytest.mark.asyncio
 async def test_search_tool_integer_limit_reaches_store(
-    client: AsyncClient, app: Any,
+    client: AsyncClient,
+    app: Any,
 ) -> None:
     """End-to-MCP-store check: an integer `limit` argument flows through
     FastMCP's Pydantic layer and our registry, reaching the store at the
