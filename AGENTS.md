@@ -4,7 +4,7 @@ This file configures agents working in the `int` repository.
 
 ## What this project is
 
-`int` is a self-hosted, Dockerized, open-source AI memory system — a local-first alternative to Supermemory. It exposes a project-scoped memory store to AI coding assistants via the Model Context Protocol (MCP), so assistants can recall prior-session learnings without re-running expensive discovery work (e.g. reconstructing a project's tech stack from 20 tool calls).
+`int` is a self-hosted, Dockerized, open-source AI memory system. It exposes a project-scoped memory store to AI coding assistants via the Model Context Protocol (MCP), so assistants can recall prior-session learnings without re-running expensive discovery work (e.g. reconstructing a project's tech stack from 20 tool calls).
 
 The server is Python/FastAPI (3.14+, uv-managed). Vector store is Qdrant (separate container). Embeddings are `gemini-embedding-001` via the Gemini API. v1 is single-tenant, no transport encryption.
 
