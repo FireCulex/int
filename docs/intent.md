@@ -4,7 +4,7 @@ Source of truth for the `int` project. Downstream skills (`spec-driven-developme
 
 ## Outcome
 
-A self-hosted, Dockerized, open-source AI memory system — a local-first alternative to Supermemory. RAG-backed. Exposed to AI coding assistants via the Model Context Protocol (MCP), so an assistant can recall prior-session learnings without re-running expensive discovery (e.g. a 20-tool-call tech-stack synthesis stored once, retrieved thereafter).
+A self-hosted, Dockerized, open-source AI memory system. RAG-backed. Exposed to AI coding assistants via the Model Context Protocol (MCP), so an assistant can recall prior-session learnings without re-running expensive discovery (e.g. a 20-tool-call tech-stack synthesis stored once, retrieved thereafter).
 
 ## User
 
@@ -13,7 +13,7 @@ A self-hosted, Dockerized, open-source AI memory system — a local-first altern
 
 ## Why now
 
-Supermemory is closed-source and external. `int` exists to give the same capability without depending on someone else's servers, and to keep the design easy to understand and contribute to.
+`int` exists to give the same capability without depending on someone else's servers, and to keep the design easy to understand and contribute to.
 
 ## Success
 
