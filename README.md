@@ -1,6 +1,6 @@
 # int
 
-Self-hosted, Dockerized, open-source AI memory system — a local-first alternative to Supermemory. Exposes a project-scoped memory store to AI coding assistants via the Model Context Protocol (MCP), so assistants can recall prior-session learnings without re-running expensive discovery work.
+Self-hosted, Dockerized, open-source AI memory system. Exposes a project-scoped memory store to AI coding assistants via the Model Context Protocol (MCP), so assistants can recall prior-session learnings without re-running expensive discovery work.
 
 ## Status
 
