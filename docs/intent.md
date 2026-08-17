@@ -67,7 +67,7 @@ No forced `[MEMORY TRIGGER DETECTED]` pattern. The assistant decides; the AGENTS
 
 ## Out of scope (v1)
 
-- Forced memory-trigger pattern (Supermemory's approach) — not copied.
+- Forced memory-trigger pattern — not copied.
 - Multi-user SaaS surface (hosted dashboard, billing, accounts).
 - Transport encryption (TLS).
 - Per-user accounts or multi-tenancy.
