@@ -50,4 +50,4 @@ Python 3.14, FastAPI + MCP (`mcp` Python SDK, Streamable HTTP), Qdrant (separate
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+Apache-2.0 — see [LICENSE](LICENSE) for details.

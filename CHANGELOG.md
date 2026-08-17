@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Static shared API key authentication
 - No raw memory content logged at INFO level
 
+### License
+- Apache-2.0 (explicit patent grant for ML/embeddings use cases)
+
 ### Infrastructure
 - Python 3.14, uv for dependency management
 - GitHub Actions ready (CI workflow to be added)
