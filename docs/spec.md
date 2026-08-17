@@ -4,7 +4,7 @@ Companion to `docs/intent.md` (the *why*) and `tasks/plan.md` (the *how*). This 
 
 ## Objective
 
-A self-hosted, Dockerized, open-source AI memory system — a local-first alternative to Supermemory. The system exposes a project-scoped memory store to AI coding assistants via the Model Context Protocol (MCP), allowing assistants to recall prior-session learnings without re-running expensive discovery work.
+A self-hosted, Dockerized, open-source AI memory system. The system exposes a project-scoped memory store to AI coding assistants via the Model Context Protocol (MCP), allowing assistants to recall prior-session learnings without re-running expensive discovery work.
 
 **Primary user:** the maintainer, running it locally inside OpenCode.
 **Secondary users:** GitHub contributors who self-host their own instance.
@@ -60,20 +60,15 @@ Gate (must pass before any commit): `uv run ruff check && uv run mypy int && uv 
 
 ```
 int/                                # repo root
-├── opencode.json                   # existing — points instructions at agent-skills + AGENTS.md
-├── AGENTS.md                       # updated — adds search-memory-first rule + salience policy
+├── AGENTS.md                       # search-memory-first rule + salience policy
 ├── pyproject.toml                  # uv/pip project config; deps; ruff/mypy/pytest config
 ├── Dockerfile                       # multi-stage Python build (server only; Qdrant is its own image)
 ├── docker-compose.yml               # int server + Qdrant
 ├── .env.example                    # all env vars documented; no values
-├── .opencode/                       # existing OpenCode runtime config (plugin dep; reserved skills/)
 ├── docs/
 │   ├── intent.md                   # confirmed intent — source of truth for downstream skills
 │   ├── spec.md                      # this file
 │   └── deployment.md                # how to run it, configure OpenCode, common pitfalls
-├── tasks/
-│   ├── plan.md                      # implementation plan (from planning-and-task-breakdown)
-│   └── todo.md                      # ordered task list (from planning-and-task-breakdown)
 ├── int/                             # the MCP server package
 │   ├── __init__.py
 │   ├── server.py                    # FastAPI app + MCP server (Streamable HTTP transport)
@@ -274,5 +269,3 @@ Specific, testable — every line maps to a verification:
 2. ~~**Gemini embedding dimension**~~ — resolved: default 768, configurable via env, L2-normalized in code.
 3. **Qdrant collection lifecycle.** Auto-create collection on server startup if missing, fail-fast with a clear message if it exists at a wrong dimension.
 4. **CLI placement.** Same package; separate entry-point via `uv` script (`int-cli`).
-5. **AGENTS.md update.** Frame preserved as "OpenCode config + agent-skills delegation + memory system policy", layered not replaced.
-6. ~~**`docs/intent.md` path**~~ — resolved: created `docs/`.
