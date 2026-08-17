@@ -31,3 +31,4 @@ uv.lock
 .DS_Store
 .opencode/
 opencode.json
+tasks/
