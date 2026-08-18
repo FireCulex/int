@@ -209,29 +209,34 @@ class QdrantStore:
     def list(self, project: str) -> list_alias[MemoryMetadata]:
         """All memory metadata in a project. No content, no embedding call."""
         self.ensure_collection()
-        try:
-            items, _next = self._client.scroll(
-                collection_name=self._collection,
-                scroll_filter=_project_filter(project),
-                limit=1_000,
-                with_payload=True,
-                with_vectors=False,
-            )
-        except Exception as e:
-            raise StoreError(f"Qdrant scroll failed: {e}") from e
-
-        metas: list[MemoryMetadata] = []
         from datetime import datetime
 
-        for point in items:
-            p = point.payload
-            metas.append(
-                MemoryMetadata(
-                    id=_to_uuid(point.id),
-                    type=p["type"],
-                    created_at=datetime.fromisoformat(p["created_at"]),
+        metas: list[MemoryMetadata] = []
+        offset: int | None = None
+        try:
+            while True:
+                items, _next = self._client.scroll(
+                    collection_name=self._collection,
+                    scroll_filter=_project_filter(project),
+                    limit=1_000,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
                 )
-            )
+                for point in items:
+                    p = point.payload
+                    metas.append(
+                        MemoryMetadata(
+                            id=_to_uuid(point.id),
+                            type=p["type"],
+                            created_at=datetime.fromisoformat(p["created_at"]),
+                        )
+                    )
+                if _next is None:
+                    break
+                offset = _next
+        except Exception as e:
+            raise StoreError(f"Qdrant scroll failed: {e}") from e
         return metas
 
     def project_names(self) -> list_alias[str]:
