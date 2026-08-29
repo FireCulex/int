@@ -239,6 +239,69 @@ class QdrantStore:
             raise StoreError(f"Qdrant scroll failed: {e}") from e
         return metas
 
+    def get_all(self, project: str) -> list_alias[Memory]:
+        """All memories in a project with full content. No embedding call.
+
+        Used for export operations. Returns full Memory objects including
+        content.
+        """
+        self.ensure_collection()
+
+        memories: list[Memory] = []
+        offset: int | None = None
+        try:
+            while True:
+                items, _next = self._client.scroll(
+                    collection_name=self._collection,
+                    scroll_filter=_project_filter(project),
+                    limit=1_000,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for point in items:
+                    p = point.payload
+                    memories.append(
+                        Memory(
+                            id=_to_uuid(point.id),
+                            project=p["project"],
+                            type=p["type"],
+                            content=p["content"],
+                            created_at=datetime.fromisoformat(p["created_at"]),
+                        )
+                    )
+                if _next is None:
+                    break
+                offset = _next
+        except Exception as e:
+            raise StoreError(f"Qdrant get_all scroll failed: {e}") from e
+
+        return memories
+
+    def get(self, memory_id: UUID) -> Memory | None:
+        """Fetch a single memory by ID with full content. No embedding call."""
+        self.ensure_collection()
+        try:
+            points = self._client.retrieve(
+                collection_name=self._collection,
+                ids=[memory_id],
+                with_payload=True,
+                with_vectors=False,
+            )
+        except Exception as e:
+            raise StoreError(f"Qdrant retrieve failed: {e}") from e
+        if not points:
+            return None
+        point = points[0]
+        p = point.payload
+        return Memory(
+            id=_to_uuid(point.id),
+            project=p["project"],
+            type=p["type"],
+            content=p["content"],
+            created_at=datetime.fromisoformat(p["created_at"]),
+        )
+
     def project_names(self) -> list_alias[str]:
         """Sorted, de-duplicated project names that have at least one memory.
 

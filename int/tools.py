@@ -56,12 +56,16 @@ class _StoreLike(Protocol):
         limit: int = 5,
     ) -> builtins.list[SearchResult]: ...
     def list(self, project: str) -> builtins.list[MemoryMetadata]: ...  # noqa: A003
+    def get(self, memory_id: UUID) -> Memory | None: ...
+    def get_all(self, project: str) -> builtins.list[Memory]: ...
     def project_names(self) -> builtins.list[str]: ...
 
 
 class _EmbedderLike(Protocol):
     async def embed_document(self, content: str) -> builtins.list[float]: ...
     async def embed_query(self, content: str) -> builtins.list[float]: ...
+    @property
+    def dimension(self) -> int: ...
 
 
 # --- Tool descriptors ---
@@ -74,10 +78,10 @@ class ToolDescriptor:
     input_schema: dict[str, Any]
 
 
-def _require_str(value: Any, *, field: str) -> str:
+def _require_str(value: Any, *, field: str, allow_empty: bool = False) -> str:
     if not isinstance(value, str):
-        raise ValidationError(f"{field} must be a non-empty string")
-    if not value:
+        raise ValidationError(f"{field} must be a string")
+    if not value and not allow_empty:
         raise ValidationError(f"{field} must be a non-empty string")
     return value
 
@@ -112,6 +116,7 @@ class ToolsRegistry:
     def __init__(self, *, store: _StoreLike, embedder: _EmbedderLike) -> None:
         self._store = store
         self._embedder = embedder
+        self._dim = embedder.dimension
 
     def list_tools(self) -> builtins.list[ToolDescriptor]:
         return [
@@ -184,6 +189,19 @@ class ToolsRegistry:
                     },
                 },
             ),
+            ToolDescriptor(
+                name="get",
+                description=(
+                    "Get a single memory by ID with full content. No embedding call."
+                ),
+                input_schema={
+                    "type": "object",
+                    "required": ["memory_id"],
+                    "properties": {
+                        "memory_id": {"type": "string", "format": "uuid"},
+                    },
+                },
+            ),
         ]
 
     async def call(self, name: str, args: dict[str, Any]) -> Any:
@@ -225,11 +243,16 @@ class ToolsRegistry:
             args,
             query_method=self._embedder.embed_query,
             store_search_method=self._store.search,
+            allow_empty_query=True,
         )
 
     async def _list(self, args: dict[str, Any]) -> builtins.list[MemoryMetadata]:
         project = _require_str(args.get("project"), field="project")
         return builtins.list(self._store.list(project))
+
+    async def _get(self, args: dict[str, Any]) -> Memory | None:
+        memory_id = _require_uuid_str(args.get("memory_id"), field="memory_id")
+        return self._store.get(memory_id)
 
     async def _do_search(
         self,
@@ -237,14 +260,18 @@ class ToolsRegistry:
         *,
         query_method: Callable[[str], Awaitable[builtins.list[float]]],
         store_search_method: Callable[..., builtins.list[SearchResult]],
+        allow_empty_query: bool = False,
     ) -> builtins.list[SearchResult]:
         project = _require_str(args.get("project"), field="project")
-        query = _require_str(args.get("query"), field="query")
+        query = _require_str(args.get("query"), field="query", allow_empty=allow_empty_query)
         limit = _require_int_in_range(args.get("limit", 5), field="limit", minimum=1, default=5)
 
-        q_vec = await query_method(query)
-        if not q_vec:
-            raise EmbeddingError("empty embedding for query")
+        if not query:
+            q_vec = [0.0] * self._dim
+        else:
+            q_vec = await query_method(query)
+            if not q_vec:
+                raise EmbeddingError("empty embedding for query")
         return builtins.list(store_search_method(project, query_vector=q_vec, limit=limit))
 
     # Dispatch table built lazily after methods are defined.
@@ -256,6 +283,7 @@ ToolsRegistry._dispatch = {
     "delete": ToolsRegistry._delete,
     "search": ToolsRegistry._search,
     "list": ToolsRegistry._list,
+    "get": ToolsRegistry._get,
 }
 
 

@@ -49,6 +49,10 @@ class FakeEmbedder:
         self.dim = dim
         self.calls: list[tuple[str, str]] = []
 
+    @property
+    def dimension(self) -> int:
+        return self.dim
+
     async def embed_document(self, content: str) -> list[float]:
         self.calls.append(("document", content))
         return self._vec(content, salt="doc")

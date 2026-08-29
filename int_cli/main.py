@@ -167,6 +167,26 @@ def list_cmd(
     _run(_go())
 
 
+@app.command(help="Export all memories in a project to a Markdown file (direct store access).")
+def export(
+    project: Annotated[str, typer.Option("--project", help="Project to export.")],
+    output: Annotated[str, typer.Option("--output", "-o", help="Output .md file path.")],
+    limit: Annotated[
+        int, typer.Option("--limit", help="Max memories to export (default 1000).")
+    ] = 1000,
+    qdrant_url: Annotated[
+        str | None, typer.Option("--qdrant-url", help="Qdrant URL (overrides env).")
+    ] = None,
+) -> None:
+    """Export memories to Markdown via direct Qdrant access (bypasses MCP)."""
+
+    async def _go() -> None:
+        items = await _export_via_direct_store(project, limit, qdrant_url)
+        _write_markdown(output, project, items)
+
+    _run(_go())
+
+
 # --- Output formatters -----------------------------------------------------
 
 
@@ -199,6 +219,91 @@ def _print_metadata(items: list[dict[str, Any]]) -> None:
         type_ = it.get("type", "")
         mid = it.get("id", "")
         typer.echo(f"  {created}  {type_:<18}  {mid}")
+
+
+def _write_markdown(output_path: str, project: str, items: list[dict[str, Any]]) -> None:
+    """Write memories to a Markdown file."""
+    from datetime import datetime
+    
+    with open(output_path, "w") as f:
+        f.write(f"# Memories Export: {project}\n\n")
+        f.write(f"Exported: {datetime.now().isoformat()}\n")
+        f.write(f"Total memories: {len(items)}\n\n")
+        f.write("---\n\n")
+        
+        if not items:
+            f.write("(no memories)\n")
+            return
+        
+        # Sort by created_at descending (newest first)
+        sorted_items = sorted(
+            items, 
+            key=lambda x: x.get("created_at", ""), 
+            reverse=True
+        )
+        
+        for item in sorted_items:
+            created = item.get("created_at", "")
+            if isinstance(created, str) and "T" in created:
+                created = created.split(".")[0]
+            type_ = item.get("type", "")
+            mid = item.get("id", "")
+            content = item.get("content", "")
+            score = item.get("score")
+            
+            f.write(f"## {created} — {type_}\n\n")
+            f.write(f"**ID:** {mid}  \n")
+            if score is not None:
+                f.write(f"**Score:** {score:.4f}  \n")
+            f.write("\n")
+            f.write(f"{content}\n\n")
+            f.write("---\n\n")
+    
+    typer.echo(f"Exported {len(items)} memories to {output_path}")
+
+
+async def _export_via_direct_store(
+    project: str,
+    limit: int,
+    qdrant_url: str | None,
+) -> list[dict[str, Any]]:
+    """Export memories by directly accessing Qdrant store (bypasses MCP)."""
+    from qdrant_client import QdrantClient
+
+    from int.config import Settings
+    from int.store import QdrantStore
+    
+    # Load settings (uses same env as server)
+    settings = Settings()
+    
+    # Create Qdrant client and store (same as server)
+    # Use provided qdrant_url or fall back to settings (which may be docker-internal)
+    url = qdrant_url or settings.qdrant_url
+    qdrant_client = QdrantClient(url=url)
+    store = QdrantStore(
+        client=qdrant_client,
+        collection_name=settings.qdrant_collection,
+        dimension=settings.gemini_embedding_dimensions,
+    )
+    
+    # Get all memories directly from store
+    memories = store.get_all(project)
+    
+    # Sort by created_at descending and limit
+    memories.sort(key=lambda m: m.created_at, reverse=True)
+    memories = memories[:limit]
+    
+    # Convert to dict format matching MCP output
+    return [
+        {
+            "id": str(m.id),
+            "project": m.project,
+            "type": m.type,
+            "content": m.content,
+            "created_at": m.created_at.isoformat(),
+        }
+        for m in memories
+    ]
 
 
 def main() -> None:

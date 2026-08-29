@@ -71,8 +71,21 @@ class FakeStore:
     def project_names(self) -> list[str]:
         return sorted({p for p, _t, _c in self.memories.values()})
 
+    def get(self, memory_id: Any) -> Any | None:
+        if memory_id not in self.memories:
+            return None
+        p, t, c = self.memories[memory_id]
+        from datetime import UTC, datetime
+
+        from int.models import Memory
+        return Memory(id=memory_id, project=p, type=t, content=c, created_at=datetime.now(UTC))
+
 
 class FakeEmbedder:
+    @property
+    def dimension(self) -> int:
+        return 768
+
     async def embed_document(self, content: str) -> list[float]:
         return [1.0] + [0.0] * 767
 
@@ -241,6 +254,7 @@ async def test_tools_exposed_at_mcp_endpoint_with_correct_names(
         "delete",
         "search",
         "list",
+        "get",
     }
 
 

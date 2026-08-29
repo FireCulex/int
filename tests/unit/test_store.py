@@ -477,3 +477,55 @@ def test_project_names_paginates_across_scroll_pages() -> None:
 
     client.scroll = capped
     assert store.project_names() == ["proj0", "proj1", "proj2", "proj3", "proj4"]
+
+
+# --- get ---
+
+
+def test_get_returns_memory_with_content() -> None:
+    from int.models import Memory
+
+    store, _ = _make_store(dim=4)
+    mid1 = store.add(Memory(project="p", type="t1", content="c1"), [1.0, 0.0, 0.0, 0.0])
+    store.add(Memory(project="p", type="t2", content="c2"), [1.0, 0.0, 0.0, 0.0])
+
+    result = store.get(mid1)
+
+    assert result is not None
+    assert result.id == mid1
+    assert result.content == "c1"
+    assert result.type == "t1"
+    assert result.project == "p"
+
+
+def test_get_missing_returns_none() -> None:
+    from uuid import uuid4
+
+    store, _ = _make_store(dim=4)
+
+    result = store.get(uuid4())
+
+    assert result is None
+
+
+# --- get_all ---
+
+
+def test_get_all_returns_memories_with_content() -> None:
+    from int.models import Memory
+
+    store, _ = _make_store(dim=4)
+    mid1 = store.add(Memory(project="p", type="t1", content="c1"), [1.0, 0.0, 0.0, 0.0])
+    mid2 = store.add(Memory(project="p", type="t2", content="c2"), [1.0, 0.0, 0.0, 0.0])
+
+    memories = store.get_all("p")
+
+    assert len(memories) == 2
+    assert {m.id for m in memories} == {mid1, mid2}
+    assert {m.content for m in memories} == {"c1", "c2"}
+    assert all(m.project == "p" for m in memories)
+
+
+def test_get_all_empty_project_returns_empty() -> None:
+    store, _ = _make_store(dim=4)
+    assert store.get_all("empty") == []

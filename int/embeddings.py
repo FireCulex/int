@@ -66,6 +66,10 @@ class Embedder:
         self._model = model
         self._dim = dimension
 
+    @property
+    def dimension(self) -> int:
+        return self._dim
+
     async def embed_document(self, content: str) -> list[float]:
         """For `add`. task_type=RETRIEVAL_DOCUMENT."""
         return await self._embed(content, task_type="RETRIEVAL_DOCUMENT")

@@ -75,11 +75,24 @@ class FakeStore:
             if p == project
         ]
 
+    def get(self, memory_id: uuid.UUID) -> Any | None:
+        if memory_id not in self.memories:
+            return None
+        p, t, c = self.memories[memory_id]
+        from datetime import UTC, datetime
+
+        from int.models import Memory
+        return Memory(id=memory_id, project=p, type=t, content=c, created_at=datetime.now(UTC))
+
 
 class FakeEmbedder:
     def __init__(self) -> None:
         self.doc_calls: list[str] = []
         self.query_calls: list[str] = []
+
+    @property
+    def dimension(self) -> int:
+        return 768
 
     async def embed_document(self, content: str) -> list[float]:
         self.doc_calls.append(content)
@@ -105,7 +118,7 @@ def _make_tools() -> tuple[Any, FakeStore, FakeEmbedder]:
 def test_tools_registry_lists_the_four_tools() -> None:
     tools, _, _ = _make_tools()
     names = {t.name for t in tools.list_tools()}
-    assert names == {"add", "delete", "search", "list"}
+    assert names == {"add", "delete", "search", "list", "get"}
 
 
 def test_each_tool_has_a_description() -> None:
@@ -293,12 +306,23 @@ async def test_search_empty_project_raises_validation_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_empty_query_raises_validation_error() -> None:
-    from int.models import ValidationError
+async def test_search_empty_query_returns_all_memories() -> None:
+    """Empty query should return all memories (export use case)."""
+    from uuid import uuid4
 
-    tools, _, _ = _make_tools()
-    with pytest.raises(ValidationError):
-        await tools.call("search", {"project": "p", "query": ""})
+    from int.models import Memory, SearchResult
+
+    tools, store, _ = _make_tools()
+
+    # Add some memories first
+    store.add(Memory(project="p", type="type1", content="content 1", id=uuid4()), [1.0] * 768)
+    store.add(Memory(project="p", type="type2", content="content 2", id=uuid4()), [1.0] * 768)
+
+    results = await tools.call("search", {"project": "p", "query": "", "limit": 10})
+
+    assert len(results) == 2
+    assert all(isinstance(r, SearchResult) for r in results)
+    assert all(r.content for r in results)
 
 
 @pytest.mark.asyncio
@@ -346,6 +370,57 @@ async def test_list_missing_project_raises_validation_error() -> None:
     tools, _, _ = _make_tools()
     with pytest.raises(ValidationError):
         await tools.call("list", {})  # type: ignore[call-arg]
+
+
+# --- get ---
+
+
+@pytest.mark.asyncio
+async def test_get_returns_memory_with_content() -> None:
+    from int.models import Memory
+
+    tools, store, _ = _make_tools()
+
+    m = Memory(project="pianoweb", type="t", content="x")
+    store.memories[m.id] = (m.project, m.type, m.content)
+
+    result = await tools.call("get", {"memory_id": str(m.id)})
+
+    assert isinstance(result, Memory)
+    assert result.id == m.id
+    assert result.content == "x"
+    assert result.type == "t"
+
+
+@pytest.mark.asyncio
+async def test_get_missing_returns_none() -> None:
+    import uuid
+
+    tools, _, _ = _make_tools()
+
+    result = await tools.call("get", {"memory_id": str(uuid.uuid4())})
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_invalid_uuid_raises_validation_error() -> None:
+    from int.models import ValidationError
+
+    tools, _, _ = _make_tools()
+
+    with pytest.raises(ValidationError):
+        await tools.call("get", {"memory_id": "not-a-uuid"})
+
+
+@pytest.mark.asyncio
+async def test_get_missing_memory_id_raises_validation_error() -> None:
+    from int.models import ValidationError
+
+    tools, _, _ = _make_tools()
+
+    with pytest.raises(ValidationError):
+        await tools.call("get", {})  # type: ignore[call-arg]
 
 
 # --- Unknown tool routing ---

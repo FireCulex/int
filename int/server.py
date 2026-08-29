@@ -199,6 +199,10 @@ def _build_mcp_fast(tools: Any, *, store: Any | None = None) -> Any:
                         else:
                             items.append(r)
                     return _json.dumps({"items": items})
+                # Single pydantic model: dump to JSON
+                if hasattr(result, "model_dump_json"):
+                    import json as _json
+                    return _json.dumps(_json.loads(result.model_dump_json()))
                 return str(result)
             except ValidationError as e:
                 logger.info("tool %s rejected: %s", name, e)

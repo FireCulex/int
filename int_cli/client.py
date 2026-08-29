@@ -41,6 +41,7 @@ from typing import Any
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.shared.exceptions import McpError
 
 # --- Errors -----------------------------------------------------------------
 
@@ -110,10 +111,10 @@ async def _open_session(
     The caller is responsible for closing `close_stack` after use.
     """
     stack = contextlib.AsyncExitStack()
+    http_ctx = None
     try:
-        read, write, _ = await stack.enter_async_context(
-            streamablehttp_client(server_url, headers={"API_KEY": api_key})
-        )
+        http_ctx = streamablehttp_client(server_url, headers={"API_KEY": api_key})
+        read, write, _ = await stack.enter_async_context(http_ctx)
         sess = await stack.enter_async_context(ClientSession(read, write))
         init = await sess.initialize()
         if not init.protocolVersion:
@@ -121,14 +122,21 @@ async def _open_session(
     except CliError:
         await stack.aclose()
         raise
+    except McpError as e:
+        await stack.aclose()
+        is_401 = (
+            getattr(e, "status_code", None) == 401
+            or "401" in str(e).lower()
+            or "unauthorized" in str(e).lower()
+        )
+        if is_401:
+            raise CliAuthError("server rejected API_KEY (401 Unauthorized)") from e
+        raise CliConnectionError(f"MCP error: {e}") from e
     except Exception as e:
         await stack.aclose()
-        # httpx raises ConnectError/ConnectTimeout; the SDK wraps auth as
-        # McpError on 401. We small-shell match the message so downstream
-        # callers get a typed category.
         msg = str(e).lower()
         if "401" in msg or "unauthorized" in msg:
-            raise CliAuthError(f"server rejected API_KEY: {e}") from e
+            raise CliAuthError("server rejected API_KEY (401 Unauthorized)") from e
         if "connect" in msg or "timed out" in msg or "timeout" in msg:
             raise CliConnectionError(f"could not reach server at {server_url}: {e}") from e
         raise CliConnectionError(f"failed to open MCP session: {e}") from e
@@ -233,6 +241,33 @@ async def call_list(
     return _parse_items(text)
 
 
+async def call_get(
+    session: Any,
+    *,
+    memory_id: str,
+) -> dict[str, Any] | None:
+    """Issue the `get` tool. Returns the memory dict or None if not found."""
+    out = await session.call_tool("get", arguments={"memory_id": memory_id})
+    text = _require_ok(out, "get")
+    return _parse_single_item(text)
+
+
+def _parse_single_item(text: str) -> dict[str, Any] | None:
+    """Parse the JSON the server emits on single-item tools (get)."""
+    if not text:
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise CliRemoteError(f"could not parse server JSON: {e}; body={text!r}") from e
+    if isinstance(payload, dict) and "items" in payload:
+        items = payload["items"]
+        return items[0] if items else None
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
 def _parse_items(text: str) -> list[dict[str, Any]]:
     """Parse the JSON the server emits on list-returning tools.
 
@@ -262,6 +297,7 @@ __all__ = [
     "CliRemoteError",
     "call_add",
     "call_delete",
+    "call_get",
     "call_list",
     "call_search",
     "resolve_config",
