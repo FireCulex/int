@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import builtins
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -209,7 +210,6 @@ class QdrantStore:
     def list(self, project: str) -> list_alias[MemoryMetadata]:
         """All memory metadata in a project. No content, no embedding call."""
         self.ensure_collection()
-        from datetime import datetime
 
         metas: list[MemoryMetadata] = []
         offset: int | None = None
@@ -321,6 +321,7 @@ class QdrantStore:
                     type=payload["type"],
                     content=payload["content"],
                     score=score,
+                    created_at=datetime.fromisoformat(payload["created_at"]),
                 )
             )
         scored.sort(key=lambda r: r.score, reverse=True)

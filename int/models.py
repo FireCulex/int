@@ -67,6 +67,7 @@ class SearchResult(BaseModel):
     type: str
     content: str
     score: float = Field(..., ge=0.0, description="Cosine similarity in [0, 1].")
+    created_at: datetime = Field(..., description="UTC creation timestamp (tz-aware).")
 
 
 class MemoryMetadata(BaseModel):

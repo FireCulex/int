@@ -48,11 +48,13 @@ class FakeStore:
         return self.memories.pop(memory_id, None) is not None
 
     def search(self, project: str, *, query_vector: list[float], limit: int = 5) -> list[Any]:
+        from datetime import UTC, datetime
+
         from int.models import SearchResult
 
         self.search_calls.append((project, list(query_vector), limit))
         return [
-            SearchResult(id=uuid4(), type="architecture", content="canned", score=0.9),
+            SearchResult(id=uuid4(), type="architecture", content="canned", score=0.9, created_at=datetime.now(UTC)),
         ][:limit]
 
     def list(self, project: str) -> list[Any]:  # noqa: A003

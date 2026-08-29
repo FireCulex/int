@@ -51,11 +51,13 @@ class FakeStore:
     ) -> list[Any]:
         self.search_calls.append((project, list(query_vector), limit))
         # Return canned SearchResult-shaped objects for tests asserting shape.
+        from datetime import UTC, datetime
+
         from int.models import SearchResult
 
         return [
-            SearchResult(id=uuid.uuid4(), type="architecture", content="canned", score=0.9),
-            SearchResult(id=uuid.uuid4(), type="command", content="canned2", score=0.5),
+            SearchResult(id=uuid.uuid4(), type="architecture", content="canned", score=0.9, created_at=datetime.now(UTC)),
+            SearchResult(id=uuid.uuid4(), type="command", content="canned2", score=0.5, created_at=datetime.now(UTC)),
         ][:limit]
 
     def list(self, project: str) -> list[Any]:  # noqa: A003

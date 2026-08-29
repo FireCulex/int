@@ -95,6 +95,7 @@ def test_search_result_constructs() -> None:
         type="architecture",
         content="Flask backend",
         score=0.874,
+        created_at=datetime.now(UTC),
     )
     assert r.score == 0.874
     assert r.type == "architecture"
@@ -103,7 +104,9 @@ def test_search_result_constructs() -> None:
 def test_search_result_score_is_float() -> None:
     from int.models import SearchResult
 
-    r = SearchResult(id=uuid.uuid4(), type="architecture", content="x", score=1)
+    r = SearchResult(
+        id=uuid.uuid4(), type="architecture", content="x", score=1, created_at=datetime.now(UTC)
+    )
     assert isinstance(r.score, float)
     assert r.score == 1.0
 
