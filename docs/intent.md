@@ -53,7 +53,8 @@ An assistant, working in a project, prompted to re-derive something a prior sess
 - **Recommended `type` values:** `architecture`, `preference`, `command`, `learned-pattern`, `conversation`, `error-solution`, `project-config`.
 - **Scoping:** per-project. One Qdrant collection, project carried as a payload field with an indexed filter. Per-project collections are a v2 option.
 - **Lifecycle:** immutable-append. "Edit" = `delete` + `add`. Revisions get a new UUID.
-- **Tool surface (MCP, project-scoped):** `add`, `delete`, `search`, `list`.
+- **Project creation is CLI-only.** A project is materialized by `int-cli create --project <name>`, which writes a single seed memory (`type="project-config"`, content = creation timestamp). The assistant-facing MCP surface can never invent a project name: `add`, `search`, and `list` reject any project string not already present with `Project 'X' does not exist.` (plus a `Did you mean 'Y'?` hint when a close name exists). This is deliberate — a typo'd project name must fail loudly rather than silently auto-create a polluted project.
+- **Tool surface (MCP, project-scoped):** `add`, `delete`, `search`, `list`, `get`. Project-scoped tools (`add`/`search`/`list`) require the project to already exist (created via CLI); `delete`/`get` are keyed by `memory_id` and need no project string.
 - **Resource surface (MCP, read-only):** `int://projects` — the sorted project names that have memories (metadata only, no content). Exists so clients can enumerate projects via `list_mcp_resources`/`read_mcp_resource` instead of guessing project names.
 
 ## Capture model

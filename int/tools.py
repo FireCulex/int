@@ -1,4 +1,4 @@
-"""int.tools — the four MCP tools exposed by the server.
+"""int.tools — the MCP tools exposed by the server.
 
 Each tool validates its input via Pydantic, then delegates to the store /
 embedder. Auth and protocol transport live in int.server, not here.
@@ -14,6 +14,7 @@ Per spec (docs/spec.md):
 - search(project, query, limit=5)    -> list[SearchResult]
 - list(project)                       -> list[MemoryMetadata] (no content,
                                        no embedding call)
+- get(memory_id)                     -> Memory | None (no embedding call)
 
 Tool names are bare (no `int.` prefix). The MCP server is registered under
 the server name `int` at the MCP layer, which already namespaces the tools
@@ -29,6 +30,7 @@ it to a specific 4xx envelope without string-matching.
 from __future__ import annotations
 
 import builtins
+import difflib
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -106,7 +108,7 @@ def _require_uuid_str(value: Any, *, field: str) -> UUID:
 
 
 class ToolsRegistry:
-    """Owns and dispatches the four MCP tools.
+    """Owns and dispatches the MCP tools.
 
     Constructed once at server startup with the store + embedder. The MCP
     layer (int.server) reflects on `list_tools()` to register them with the
@@ -219,10 +221,30 @@ class ToolsRegistry:
 
     # --- Tool implementations ---
 
+    def _require_project_exists(self, project: str) -> None:
+        """Reject a project string that is not yet a materialized project.
+
+        Projects are created via the CLI (`int-cli create`), never by the
+        assistant-facing MCP surface. A typo'd project name must fail loudly
+        here rather than silently auto-creating a polluted project. Unknown
+        names raise ValidationError with an optional near-match hint so the
+        client sees "did you mean 'X'?" instead of a bare failure.
+        """
+        known = self._store.project_names()
+        if project in known:
+            return
+        hint = difflib.get_close_matches(project, known, n=1, cutoff=0.6)
+        if hint:
+            raise ValidationError(
+                f"Project {project!r} does not exist. Did you mean {hint[0]!r}?"
+            )
+        raise ValidationError(f"Project {project!r} does not exist.")
+
     async def _add(self, args: dict[str, Any]) -> str:
         project = _require_str(args.get("project"), field="project")
         type_ = _require_str(args.get("type"), field="type")
         content = _require_str(args.get("content"), field="content")
+        self._require_project_exists(project)
 
         vec = await self._embedder.embed_document(content)
         memory = Memory(
@@ -248,6 +270,7 @@ class ToolsRegistry:
 
     async def _list(self, args: dict[str, Any]) -> builtins.list[MemoryMetadata]:
         project = _require_str(args.get("project"), field="project")
+        self._require_project_exists(project)
         return builtins.list(self._store.list(project))
 
     async def _get(self, args: dict[str, Any]) -> Memory | None:
@@ -265,6 +288,7 @@ class ToolsRegistry:
         project = _require_str(args.get("project"), field="project")
         query = _require_str(args.get("query"), field="query", allow_empty=allow_empty_query)
         limit = _require_int_in_range(args.get("limit", 5), field="limit", minimum=1, default=5)
+        self._require_project_exists(project)
 
         if not query:
             q_vec = [0.0] * self._dim

@@ -187,6 +187,240 @@ def export(
     _run(_go())
 
 
+@app.command("import", help="Import memories from a Markdown or JSON export file into a project.")
+def import_cmd(
+    project: Annotated[str, typer.Option("--project", help="Target project to import into.")],
+    input: Annotated[str, typer.Option("--input", "-i", help="Input file path (.md or .json).")],
+    server_url: Annotated[
+        str | None, typer.Option("--server-url", help="Overrides INT_SERVER_URL.")
+    ] = None,
+    api_key: Annotated[str | None, typer.Option("--api-key", help="Overrides API_KEY.")] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Parse only, don't import.")] = False,
+) -> None:
+    """Import memories from an export file using the MCP add tool."""
+
+    async def _go() -> None:
+        items = _parse_import_file(input)
+        if not items:
+            typer.echo("No memories found in import file.")
+            return
+
+        typer.echo(f"Found {len(items)} memories to import.")
+        if dry_run:
+            typer.echo("Dry run: skipping import.")
+            for i, item in enumerate(items, 1):
+                type_ = item.get("type", "")
+                content_preview = item.get("content", "")[:60].replace("\n", " ")
+                typer.echo(f"  {i}. type={type_} content={content_preview}...")
+            return
+
+        async with session(server_url=server_url, api_key=api_key) as s:
+            imported = 0
+            failed = 0
+            for i, item in enumerate(items, 1):
+                type_ = item.get("type", "imported")
+                content = item.get("content", "")
+                if not content:
+                    typer.secho(f"  {i}/{len(items)} SKIP (empty content)", fg=typer.colors.YELLOW)
+                    continue
+                
+                # Retry with exponential backoff for rate limits
+                max_retries = 5
+                base_delay = 2.0  # seconds
+                for attempt in range(max_retries):
+                    try:
+                        mid = await call_add(s, project=project, type_=type_, content=content)
+                        typer.echo(f"  {i}/{len(items)} OK id={mid} type={type_}")
+                        imported += 1
+                        break
+                    except Exception as e:
+                        err_str = str(e).lower()
+                        is_rate_limit = (
+                            "429" in err_str
+                            or "resource_exhausted" in err_str
+                            or "quota" in err_str
+                        )
+                        if is_rate_limit and attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)
+                            msg = (
+                                f"  {i}/{len(items)} RATE LIMITED, "
+                                f"retrying in {delay:.0f}s "
+                                f"(attempt {attempt+1}/{max_retries})"
+                            )
+                            typer.secho(msg, fg=typer.colors.YELLOW)
+                            await asyncio.sleep(delay)
+                            continue
+                        typer.secho(f"  {i}/{len(items)} FAILED: {e}", fg=typer.colors.RED)
+                        failed += 1
+                        break
+            typer.echo(f"\nImport complete: {imported} imported, {failed} failed.")
+
+    _run(_go())
+
+
+@app.command(
+    "copy",
+    help=(
+        "Copy all memories from one project to another "
+        "(direct store, preserves vectors, no embedding)."
+    ),
+)
+def copy_cmd(
+    source_project: Annotated[
+        str, typer.Option("--source", "-s", help="Source project to copy from.")
+    ],
+    target_project: Annotated[
+        str, typer.Option("--target", "-t", help="Target project to copy into.")
+    ],
+    qdrant_url: Annotated[
+        str | None, typer.Option("--qdrant-url", help="Qdrant URL (overrides env).")
+    ] = None,
+    preserve_timestamps: Annotated[
+        bool,
+        typer.Option(
+            "--preserve-timestamps/--new-timestamps", help="Keep original created_at."
+        ),
+    ] = True,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Count only, don't copy.")] = False,
+) -> None:
+    """Copy memories directly in Qdrant, preserving vectors (bypasses MCP and embedding)."""
+
+    async def _go() -> None:
+        from qdrant_client import QdrantClient
+
+        from int.config import Settings
+        from int.store import QdrantStore
+
+        settings = Settings()
+        url = qdrant_url or settings.qdrant_url
+        qdrant_client = QdrantClient(url=url)
+        store = QdrantStore(
+            client=qdrant_client,
+            collection_name=settings.qdrant_collection,
+            dimension=settings.gemini_embedding_dimensions,
+        )
+
+        # Count first
+        items = store.get_all_with_vectors(source_project)
+        count = len(items)
+        
+        if count == 0:
+            typer.echo(f"No memories found in project '{source_project}'.")
+            return
+
+        typer.echo(f"Found {count} memories in '{source_project}'.")
+        
+        if dry_run:
+            typer.echo("Dry run: skipping copy.")
+            return
+
+        # Do the copy
+        copied = store.copy_project(
+            source_project,
+            target_project,
+            preserve_timestamps=preserve_timestamps,
+        )
+        typer.echo(f"Copied {copied} memories to '{target_project}'.")
+
+    _run(_go())
+
+
+@app.command(
+    "create",
+    help=(
+        "Create a project by writing a seed memory (direct store access). "
+        "Projects must exist before the MCP add/search/list tools accept them."
+    ),
+)
+def create_cmd(
+    project: Annotated[str, typer.Option("--project", help="Project to create.")],
+    qdrant_url: Annotated[
+        str | None, typer.Option("--qdrant-url", help="Qdrant URL (overrides env).")
+    ] = None,
+) -> None:
+    """Create a project via direct Qdrant access (bypasses MCP)."""
+
+    async def _go() -> None:
+        from datetime import UTC, datetime
+
+        from qdrant_client import QdrantClient
+
+        from int.config import Settings
+        from int.models import Memory
+        from int.store import QdrantStore
+
+        settings = Settings()
+        url = qdrant_url or settings.qdrant_url
+        qdrant_client = QdrantClient(url=url)
+        store = QdrantStore(
+            client=qdrant_client,
+            collection_name=settings.qdrant_collection,
+            dimension=settings.gemini_embedding_dimensions,
+        )
+
+        if project in store.project_names():
+            typer.echo(f"Project '{project}' already exists.")
+            return
+
+        seed = Memory(
+            project=project,
+            type="project-config",
+            content=f"Project created {datetime.now(UTC).isoformat()}",
+        )
+        store.add(seed, [0.0] * settings.gemini_embedding_dimensions)
+        typer.echo(f"Created project '{project}'.")
+
+    _run(_go())
+
+
+@app.command("purge", help="Delete ALL memories in a project (direct store access).")
+def purge_cmd(
+    project: Annotated[str, typer.Option("--project", help="Project to purge.")],
+    qdrant_url: Annotated[
+        str | None, typer.Option("--qdrant-url", help="Qdrant URL (overrides env).")
+    ] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation.")] = False,
+) -> None:
+    """Purge all memories in a project via direct Qdrant access."""
+
+    if not yes:
+        confirm = typer.confirm(f"Delete ALL memories in '{project}'? This cannot be undone.")
+        if not confirm:
+            typer.echo("Aborted.")
+            return
+
+    async def _go() -> None:
+        from qdrant_client import QdrantClient
+
+        from int.config import Settings
+        from int.store import QdrantStore
+
+        settings = Settings()
+        url = qdrant_url or settings.qdrant_url
+        qdrant_client = QdrantClient(url=url)
+        store = QdrantStore(
+            client=qdrant_client,
+            collection_name=settings.qdrant_collection,
+            dimension=settings.gemini_embedding_dimensions,
+        )
+
+        items = store.get_all(project)
+        count = len(items)
+        if count == 0:
+            typer.echo(f"No memories found in project '{project}'.")
+            return
+
+        # Delete all by UUID
+        deleted = 0
+        for mem in items:
+            if store.delete(mem.id):
+                deleted += 1
+
+        typer.echo(f"Deleted {deleted}/{count} memories from '{project}'.")
+
+    _run(_go())
+
+
 # --- Output formatters -----------------------------------------------------
 
 
@@ -304,6 +538,106 @@ async def _export_via_direct_store(
         }
         for m in memories
     ]
+
+
+def _parse_import_file(input_path: str) -> list[dict[str, Any]]:
+    """Parse an import file (Markdown or JSON) and return list of memory dicts."""
+    import json
+    import re
+    from pathlib import Path
+    
+    path = Path(input_path)
+    if not path.exists():
+        raise typer.BadParameter(f"File not found: {input_path}")
+    
+    content = path.read_text(encoding="utf-8")
+    
+    # Try JSON first
+    if path.suffix.lower() == ".json":
+        try:
+            data = json.loads(content)
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict) and "memories" in data:
+                return data["memories"]
+            if isinstance(data, dict) and "items" in data:
+                return data["items"]
+            # Single memory object
+            return [data]
+        except json.JSONDecodeError as e:
+            raise typer.BadParameter(f"Invalid JSON: {e}") from e
+    
+    # Parse Markdown format (as produced by export command)
+    # Format:
+    # ## {created} — {type}
+    # **ID:** {mid}
+    # **Score:** {score}  (optional)
+    # 
+    # {content}
+    # ---
+    items = []
+    
+    # Split by --- delimiter
+    sections = content.split("\n---\n")
+    for section in sections:
+        section = section.strip()
+        if not section or section.startswith("# Memories Export"):
+            continue
+        
+        lines = section.split("\n")
+        if not lines:
+            continue
+        
+        # First non-empty line should be: ## {created} — {type}
+        header_idx = 0
+        while header_idx < len(lines) and lines[header_idx] == "":
+            header_idx += 1
+        if header_idx >= len(lines):
+            continue
+        
+        first_line = lines[header_idx]
+        match = re.match(r"^##\s+(.+?)\s+—\s+(.+)$", first_line)
+        if not match:
+            continue
+        
+        created_str = match.group(1).strip()
+        type_ = match.group(2).strip()
+        
+        # Parse metadata lines (ID, Score) - skip them when finding content
+        mid = ""
+        content_start_idx = header_idx + 1
+        seen_metadata = False
+        for i in range(header_idx + 1, len(lines)):
+            line = lines[i]
+            if line.startswith("**ID:**"):
+                mid = line.replace("**ID:**", "").strip()
+                seen_metadata = True
+            elif line.startswith("**Score:**"):
+                seen_metadata = True
+            elif line == "" and seen_metadata:
+                # Found blank line after metadata - content starts after this
+                content_start_idx = i + 1
+                break
+            elif line != "" and not seen_metadata:
+                # Content line before any metadata - treat as content start
+                content_start_idx = i
+                break
+        
+        # Content starts after the blank line following metadata
+        content_lines = lines[content_start_idx:]
+        content = "\n".join(content_lines).strip()
+        if content.endswith("---"):
+            content = content[:-3].strip()
+        
+        if content:
+            items.append({
+                "id": mid,
+                "type": type_,
+                "content": content,
+                "created_at": created_str,
+            })
+    
+    return items
 
 
 def main() -> None:

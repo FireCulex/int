@@ -27,15 +27,20 @@ import pytest
 
 
 class FakeStore:
-    def __init__(self) -> None:
+    def __init__(self, *, known_projects: list[str] | None = None) -> None:
         self.memories: dict[uuid.UUID, tuple[str, str, str]] = {}
         self.add_calls: list[tuple[Any, list[float]]] = []
         self.delete_calls: list[uuid.UUID] = []
         self.search_calls: list[tuple[str, list[float], int]] = []
+        # Projects that already exist (have at least one memory). The
+        # existence guard derives from project_names(); pre-seed the names
+        # the tests reference so the guard passes for them.
+        self._known_projects: set[str] = set(known_projects or [])
 
     def add(self, memory: Any, embedding: list[float]) -> uuid.UUID:
         self.add_calls.append((memory, list(embedding)))
         self.memories[memory.id] = (memory.project, memory.type, memory.content)
+        self._known_projects.add(memory.project)
         return memory.id
 
     def delete(self, memory_id: uuid.UUID) -> bool:
@@ -84,6 +89,10 @@ class FakeStore:
         from int.models import Memory
         return Memory(id=memory_id, project=p, type=t, content=c, created_at=datetime.now(UTC))
 
+    def project_names(self) -> list[str]:
+        names = self._known_projects | {p for (p, _, _) in self.memories.values()}
+        return sorted(names)
+
 
 class FakeEmbedder:
     def __init__(self) -> None:
@@ -103,10 +112,14 @@ class FakeEmbedder:
         return [1.0] + [0.0] * 767
 
 
-def _make_tools() -> tuple[Any, FakeStore, FakeEmbedder]:
+def _make_tools(
+    *, known_projects: list[str] | None = None
+) -> tuple[Any, FakeStore, FakeEmbedder]:
     from int.tools import ToolsRegistry
 
-    store = FakeStore()
+    if known_projects is None:
+        known_projects = ["p", "pianoweb"]
+    store = FakeStore(known_projects=known_projects)
     embedder = FakeEmbedder()
     tools = ToolsRegistry(store=store, embedder=embedder)
     return tools, store, embedder
@@ -421,6 +434,62 @@ async def test_get_missing_memory_id_raises_validation_error() -> None:
 
     with pytest.raises(ValidationError):
         await tools.call("get", {})  # type: ignore[call-arg]
+
+
+# --- project-existence guard ---
+
+
+@pytest.mark.asyncio
+async def test_add_unknown_project_raises_with_did_you_mean() -> None:
+    from int.models import ValidationError
+
+    tools, _, _ = _make_tools(known_projects=["avermedia-c985-linux"])
+    with pytest.raises(ValidationError) as exc:
+        await tools.call(
+            "add",
+            {"project": "avermedia-c985", "type": "t", "content": "x"},
+        )
+    assert "does not exist" in str(exc.value)
+    assert "Did you mean 'avermedia-c985-linux'" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_add_unknown_project_without_near_match() -> None:
+    from int.models import ValidationError
+
+    tools, _, _ = _make_tools(known_projects=["int", "pianoweb"])
+    with pytest.raises(ValidationError) as exc:
+        await tools.call(
+            "add",
+            {"project": "zzz-unrelated", "type": "t", "content": "x"},
+        )
+    assert "zzz-unrelated" in str(exc.value)
+    assert "Did you mean" not in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_search_unknown_project_raises() -> None:
+    from int.models import ValidationError
+
+    tools, _, _ = _make_tools(known_projects=["pianoweb"])
+    with pytest.raises(ValidationError):
+        await tools.call("search", {"project": "missing", "query": "q"})
+
+
+@pytest.mark.asyncio
+async def test_list_unknown_project_raises() -> None:
+    from int.models import ValidationError
+
+    tools, _, _ = _make_tools(known_projects=["pianoweb"])
+    with pytest.raises(ValidationError):
+        await tools.call("list", {"project": "missing"})
+
+
+@pytest.mark.asyncio
+async def test_list_known_project_succeeds() -> None:
+    tools, _, _ = _make_tools(known_projects=["pianoweb"])
+    result = await tools.call("list", {"project": "pianoweb"})
+    assert isinstance(result, list)
 
 
 # --- Unknown tool routing ---

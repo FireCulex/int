@@ -33,15 +33,17 @@ from httpx import ASGITransport, AsyncClient
 
 
 class FakeStore:
-    def __init__(self) -> None:
+    def __init__(self, *, known_projects: list[str] | None = None) -> None:
         self.memories: dict[Any, tuple[str, str, str]] = {}
         self.search_calls: list[tuple[str, list[float], int]] = []
+        self._known_projects: set[str] = set(known_projects or [])
 
     def ensure_collection(self) -> None:
         return None
 
     def add(self, memory: Any, embedding: list[float]) -> Any:
         self.memories[memory.id] = (memory.project, memory.type, memory.content)
+        self._known_projects.add(memory.project)
         return memory.id
 
     def delete(self, memory_id: Any) -> bool:
@@ -69,7 +71,8 @@ class FakeStore:
         ]
 
     def project_names(self) -> list[str]:
-        return sorted({p for p, _t, _c in self.memories.values()})
+        names = self._known_projects | {p for p, _t, _c in self.memories.values()}
+        return sorted(names)
 
     def get(self, memory_id: Any) -> Any | None:
         if memory_id not in self.memories:
@@ -102,7 +105,7 @@ def _build_app(
     """Construct the int.server app with injected fakes; bypass Settings env."""
     from int.server import build_app
 
-    store = store or FakeStore()
+    store = store or FakeStore(known_projects=["pianoweb", "p"])
     embedder = embedder or FakeEmbedder()
     return build_app(
         api_key=api_key,

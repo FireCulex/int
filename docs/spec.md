@@ -48,6 +48,7 @@ uv run ruff format .                                   # format
 uv run mypy int                                        # typecheck
 
 # CLI inspection (talks to the server over HTTP, same API_KEY as MCP clients)
+uv run int-cli create --project <p>                       # create a project (writes seed memory)
 uv run int-cli add    --project <p> --type architecture --content "..."
 uv run int-cli search --project <p> --query "tech stack"
 uv run int-cli list   --project <p>
@@ -76,10 +77,11 @@ int/                                # repo root
 │   ├── embeddings.py                # Gemini embedding client; bakes in task_type + L2 norm
 │   ├── store.py                     # Qdrant client wrapper: add/delete/search/list
 │   ├── models.py                    # Pydantic types: Memory, SearchResult, etc.
-│   └── tools.py                     # MCP tool definitions (the 4 tool surface)
-├── int_cli/                         # dev/ops CLI for manual inspection
+│   └── tools.py                     # MCP tool definitions (add/delete/search/list/get)
+├── int_cli/                         # dev/ops CLI for manual inspection + project creation
 │   ├── __init__.py
-│   └── main.py                      # Typer/Click CLI; calls server over HTTP
+│   ├── client.py                    # thin MCP-over-HTTP client (session + tool-call helpers)
+│   └── main.py                      # Typer CLI; MCP tools over HTTP + direct-store ops (create/copy/purge/export/import)
 └── tests/
     ├── conftest.py
     ├── unit/                        # fast, no network — models, store (Qdrant stubbed), CLI args
@@ -165,12 +167,15 @@ Conventions:
 
 All tools are project-scoped. All inputs validated at the MCP boundary; raise typed exceptions → translated to MCP error responses. Tool names are bare (`add`, `search`, ...) — the MCP server's name (`int`) already namespaces them, so MCP clients expose them as `int_add`, `int_search`, etc.
 
+Projects are created via the CLI (`int-cli create`), never by the MCP surface. A project-scoped tool that references an unknown project name raises `ValidationError` — `Project 'X' does not exist.` (with a `Did you mean 'Y'?` hint when `difflib` finds a near match). This prevents a typo'd project name from silently auto-creating a polluted project.
+
 | Tool | Inputs | Output | Description |
 |---|---|---|---|
-| `add` | `project: str`, `type: str`, `content: str` | `memory_id: str` (UUID) | Embed content as `RETRIEVAL_DOCUMENT`, store in Qdrant, return new ID. |
+| `add` | `project: str`, `type: str`, `content: str` | `memory_id: str` (UUID) | Embed content as `RETRIEVAL_DOCUMENT`, store in Qdrant, return new ID. Requires `project` to already exist. |
 | `delete` | `memory_id: str` | `deleted: bool` | Remove a memory by ID. Idempotent on missing (returns `false`). |
-| `search` | `project: str`, `query: str`, `limit: int = 5` | `list[SearchResult]` (content, score, id, type) | Embed query as `RETRIEVAL_QUERY`, cosine search Qdrant filtered by `project`. |
-| `list` | `project: str` | `list[Memory]` (id, type, created_at; **no content**) | List memories in a project — metadata only, no embedding call, no content returned. |
+| `search` | `project: str`, `query: str`, `limit: int = 5` | `list[SearchResult]` (content, score, id, type) | Embed query as `RETRIEVAL_QUERY`, cosine search Qdrant filtered by `project`. Requires `project` to already exist. |
+| `list` | `project: str` | `list[Memory]` (id, type, created_at; **no content**) | List memories in a project — metadata only, no embedding call, no content returned. Requires `project` to already exist. |
+| `get` | `memory_id: str` | `Memory \| null` | Fetch a single memory by ID with full content. No embedding call. |
 
 **Auth:** every tool call requires `API_KEY` header matching server's `API_KEY`. Missing/mismatched → 401.
 
@@ -235,7 +240,7 @@ Loaded via `int/config.py` (pydantic-settings). Fail-fast on missing required va
 
 **Ask first:**
 - Swapping the embedding model or changing the collection dimension (silently invalidates stored vectors).
-- Adding a new MCP tool outside v1's four (`add`/`delete`/`search`/`list`), or any new MCP resource beyond the single read-only `int://projects` (resources and tools are both MCP surface).
+- Adding a new MCP tool outside v1's five (`add`/`delete`/`search`/`list`/`get`), or any new MCP resource beyond the single read-only `int://projects` (resources and tools are both MCP surface).
 - Adding any dependency to `pyproject.toml`.
 - Changing the docker-compose service topology (e.g. embedding Qdrant in the server container).
 - Introducing auth beyond the static shared key.
@@ -252,14 +257,14 @@ Loaded via `int/config.py` (pydantic-settings). Fail-fast on missing required va
 
 Specific, testable — every line maps to a verification:
 
-1. **Four-tool MCP surface works.** `add`, `delete`, `search`, `list` are all callable from an MCP client against the running server. `search` returns ranked results; `list` returns metadata without content.
+1. **MCP tool surface works.** `add`, `delete`, `search`, `list`, `get` are all callable from an MCP client against the running server. `search` returns ranked results; `list` returns metadata without content. Unknown project names on `add`/`search`/`list` fail with `Project 'X' does not exist.`
 2. **Project scoping is enforced.** `search` on project A returns zero hits from project B's stored memories. Stored as a Qdrant payload field with an indexed filter.
 3. **Recall without re-discovery.** Given a stored architecture synthesis for a project, a semantic query returns it in the top 3 results with cosine similarity ≥ 0.6. Verified by an integration test using a representative synthesis as fixture content.
 4. **Single container dependency.** `docker compose up` from a clean clone brings up a working server + Qdrant within 60s on a warm cache. First-run (incl. Docker image pull) ≤ 5 min.
 5. **Env-driven config verified.** Changing `GEMINI_EMBEDDING_DIMENSIONS` creates a new Qdrant collection with that size; changing `API_KEY` rejects clients using the old key. Both covered by integration tests.
 6. **Offline-degrade is explicit.** If `GEMINI_API_KEY` is missing or the API is unreachable, `add`/`search` return a typed `EmbeddingError` (not a crash). `list` (no embedding needed) still works.
 7. **AGENTS.md policy is in place.** The repo's `AGENTS.md` contains the search-first rule and a salience policy ("save when the cost to re-discover > cost to save"). Read-only check.
-8. **CLI inspection works.** All four operations reachable from `int-cli` for debugging/operational access without an MCP client.
+8. **CLI inspection + project creation works.** All four CRUD operations reachable from `int-cli` for debugging/operational access without an MCP client, and `int-cli create --project <name>` materializes a project so the MCP surface accepts it.
 9. **Public repo hygiene.** `docker compose up && uv run pytest` works from a fresh clone. No `.env` present in git; `.env.example` documented.
 10. **Embeddings are L2-normalized.** Every vector in Qdrant has `norm == 1.0` within float tolerance. Asserted in every integration test that calls `add` + `search`.
 

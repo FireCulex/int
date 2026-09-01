@@ -1,8 +1,8 @@
 """int.store — Qdrant-backed project-scoped memory store.
 
-Public surface mirrors the spec's four tools (minus embedding generation,
-which lives in int.embeddings). The store is project-scoped: every search and
-list passes a Qdrant payload filter on the `project` field, so cross-project
+Public surface mirrors the spec's tools (minus embedding generation, which
+lives in int.embeddings). The store is project-scoped: every search and list
+passes a Qdrant payload filter on the `project` field, so cross-project
 leakage is impossible by construction.
 
 Collection lifecycle (see `ensure_collection`):
@@ -18,7 +18,7 @@ import builtins
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import numpy as np
 
@@ -165,6 +165,105 @@ class QdrantStore:
         except Exception as e:
             raise StoreError(f"Qdrant upsert failed: {e}") from e
         return memory.id
+
+    def add_with_vector(self, memory: Memory, vector: Sequence[float]) -> UUID:
+        """Store a memory with a pre-computed vector (bypasses embedding).
+
+        Use for direct project-to-project copies where vectors are already
+        computed and stored. Identical to `add` but semantically distinct.
+        """
+        return self.add(memory, vector)
+
+    def get_all_with_vectors(self, project: str) -> list_alias[tuple[Memory, list[float]]]:
+        """All memories in a project with full content AND vectors.
+
+        Used for direct export/copy operations. Returns (Memory, vector) tuples.
+        """
+        self.ensure_collection()
+
+        results: list[tuple[Memory, list[float]]] = []
+        offset: int | None = None
+        try:
+            while True:
+                items, _next = self._client.scroll(
+                    collection_name=self._collection,
+                    scroll_filter=_project_filter(project),
+                    limit=1_000,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=True,
+                )
+                for point in items:
+                    p = point.payload
+                    memory = Memory(
+                        id=_to_uuid(point.id),
+                        project=p["project"],
+                        type=p["type"],
+                        content=p["content"],
+                        created_at=datetime.fromisoformat(p["created_at"]),
+                    )
+                    vector = list(point.vector) if point.vector is not None else []
+                    results.append((memory, vector))
+                if _next is None:
+                    break
+                offset = _next
+        except Exception as e:
+            raise StoreError(f"Qdrant get_all_with_vectors scroll failed: {e}") from e
+
+        return results
+
+    def copy_project(
+        self,
+        source_project: str,
+        target_project: str,
+        *,
+        preserve_timestamps: bool = True,
+    ) -> int:
+        """Copy all memories from one project to another, preserving vectors.
+
+        Reads all points from source_project (with vectors), creates new UUIDs,
+        updates project field to target_project, and upserts. No embedding calls.
+
+        Returns the number of memories copied.
+        """
+        self.ensure_collection()
+
+        # Fetch all memories with vectors from source
+        items = self.get_all_with_vectors(source_project)
+        if not items:
+            return 0
+
+        # Prepare points for target project
+        points = []
+        for memory, vector in items:
+            new_id = uuid4()
+            created_at = (
+                memory.created_at.isoformat()
+                if preserve_timestamps
+                else datetime.now().isoformat()
+            )
+            payload = {
+                "project": target_project,
+                "type": memory.type,
+                "content": memory.content,
+                "created_at": created_at,
+            }
+            points.append({
+                "id": new_id,
+                "vector": vector,
+                "payload": payload,
+            })
+
+        # Batch upsert
+        try:
+            self._client.upsert(
+                collection_name=self._collection,
+                points=points,
+            )
+        except Exception as e:
+            raise StoreError(f"Qdrant copy_project upsert failed: {e}") from e
+
+        return len(points)
 
     def delete(self, memory_id: UUID) -> bool:
         """Idempotent delete. Returns True if something was deleted, else False.

@@ -47,25 +47,30 @@ from mcp.client.streamable_http import streamablehttp_client
 class _FakeStore:
     """In-memory QdrantStore stand-in for in-sandbox E2E paths."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, known_projects: list[str] | None = None) -> None:
         self.memories: dict[Any, tuple[str, str, str]] = {}
+        self._known_projects: set[str] = set(known_projects or [])
 
     def ensure_collection(self) -> None:
         return None
 
     def add(self, memory: Any, embedding: list[float]) -> Any:
         self.memories[memory.id] = (memory.project, memory.type, memory.content)
+        self._known_projects.add(memory.project)
         return memory.id
 
     def delete(self, memory_id: Any) -> bool:
         return self.memories.pop(memory_id, None) is not None
 
     def search(self, project: str, *, query_vector: list[float], limit: int = 5) -> list[Any]:
+        from datetime import UTC, datetime
         from uuid import uuid4
 
         from int.models import SearchResult
 
-        return [SearchResult(id=uuid4(), type="architecture", content="canned", score=0.9)][:limit]
+        return [
+            SearchResult(id=uuid4(), type="architecture", content="canned", score=0.9, created_at=datetime.now(UTC))
+        ][:limit]
 
     def list(self, project: str) -> list[Any]:  # noqa: A003
         from datetime import UTC, datetime
@@ -77,6 +82,10 @@ class _FakeStore:
             for mid, (p, t, _c) in self.memories.items()  # noqa: B007
             if p == project
         ]
+
+    def project_names(self) -> list[str]:
+        names = self._known_projects | {p for p, _t, _c in self.memories.values()}
+        return sorted(names)
 
 
 class _BrokenEmbedder:
@@ -165,7 +174,7 @@ async def server(
     """Happy-path server: FakeStore + FakeEmbedder."""
     async with _serve(
         api_key="shared-secret",
-        store=_FakeStore(),
+        store=_FakeStore(known_projects=["pianoweb", "p"]),
         embedder=_default_embedder(),
     ) as (base_url, api_key):
         yield base_url, api_key
@@ -197,7 +206,7 @@ async def degrade_server(
     """Server wired with `_BrokenEmbedder` and `_FakeStore` (no Qdrant)."""
     async with _serve(
         api_key="shared-secret",
-        store=_FakeStore(),
+        store=_FakeStore(known_projects=["pianoweb", "p"]),
         embedder=_BrokenEmbedder(),
     ) as (base_url, api_key):
         yield base_url, api_key
@@ -241,20 +250,20 @@ def _json_items(out: Any) -> list[dict[str, Any]]:
 
 
 # =============================================================================
-# (1) All four tools, end-to-end, via real MCP client against live server
+# (1) All tools, end-to-end, via real MCP client against live server
 # =============================================================================
 
 
 @pytest.mark.asyncio
 @pytest.mark.e2e
-async def test_mcp_client_sees_all_four_tools(
+async def test_mcp_client_sees_all_tools(
     mcp_client: tuple[ClientSession, str],
 ) -> None:
-    """`tools/list` exposes the four-tool surface with the right names."""
+    """`tools/list` exposes the tool surface with the right names."""
     session, _ = mcp_client
     result = await session.list_tools()
     names = {t.name for t in result.tools}
-    assert names == {"add", "delete", "search", "list"}
+    assert names == {"add", "delete", "search", "list", "get"}
 
 
 @pytest.mark.asyncio
@@ -451,6 +460,14 @@ async def test_e2e_full_crud_over_http_with_real_qdrant(
     delete again for idempotence) succeeds end-to-end over the real MCP HTTP
     transport. Skipped cleanly when Qdrant is not reachable from Python."""
     store = _make_real_store(qdrant_container, dim=fake_embedder.dim)
+    # Projects are created via the CLI (a seed memory), never by MCP `add`.
+    # Seed `pianoweb` directly through the store so the existence guard passes.
+    from int.models import Memory
+
+    store.add(
+        Memory(project="pianoweb", type="project-config", content="seeded"),
+        [0.0] * fake_embedder.dim,
+    )
     async with (
         _serve(api_key="shared-secret", store=store, embedder=fake_embedder) as (base_url, api_key),
         streamablehttp_client(base_url, headers={"API_KEY": api_key}) as (read, write, _),

@@ -3,7 +3,7 @@
 The server:
 1. Loads Settings from env (API_KEY, GEMINI_*, QDRANT_*).
 2. Constructs one Embedder (Gemini), one QdrantStore (with dimension check),
-   and one ToolsRegistry (the four MCP tools).
+   and one ToolsRegistry (the MCP tools).
 3. Exposes those tools via a FastMCP server on the Streamable HTTP transport,
    mounted at /mcp.
 4. Wraps the MCP ASGI app in a FastAPI app that validates the API_KEY header

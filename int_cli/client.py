@@ -3,12 +3,13 @@
 The CLI talks to the int memory server using the same MCP Streamable HTTP
 transport as any MCP client (including OpenCode). It performs the
 `initialize` -> `notifications/initialized` handshake, then issues
-`tools/call` requests for each of the four tools:
+`tools/call` requests for each of the tools:
 
     add(project, type, content)          -> memory_id string
     delete(memory_id)                    -> "true" | "false"
     search(project, query, limit=5)      -> list[SearchResult dict]
     list(project)                        -> list[MemoryMetadata dict]
+    get(memory_id)                       -> Memory dict | None
 
 Tool names are bare (the MCP server is registered under the name `int`,
 which namespaces them for clients). This module owns the only place where
