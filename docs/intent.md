@@ -49,7 +49,7 @@ An assistant, working in a project, prompted to re-derive something a prior sess
 
 ## Memory model
 
-- **Schema:** freeform + a `type` tag with a *recommended* enum, not an enforced one. Promote to semi-structured in v2 once recurring patterns ossify.
+- **Schema:** freeform + a `type` tag with a *recommended* enum, not an enforced one. Optional `summary` field (one-line, written by the assistant) for quick scanning in list views. Promote to semi-structured in v2 once recurring patterns ossify.
 - **Recommended `type` values:** `architecture`, `preference`, `command`, `learned-pattern`, `conversation`, `error-solution`, `project-config`.
 - **Scoping:** per-project. One Qdrant collection, project carried as a payload field with an indexed filter. Per-project collections are a v2 option.
 - **Lifecycle:** immutable-append. "Edit" = `delete` + `add`. Revisions get a new UUID.

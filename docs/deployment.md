@@ -206,10 +206,16 @@ start.
 
 ### Embedding outage — graceful behavior
 
-If `GEMINI_API_KEY` is missing/wrong, the Gemini API is rate-limiting, or
-the network can't reach `generativelanguage.googleapis.com`, the two
-operations that need embeddings (`add`, `search`) both return a
-typed `EmbeddingError` envelope. They do not crash the server.
+If `GEMINI_API_KEY` is missing/wrong, or the network can't reach
+`generativelanguage.googleapis.com`, the two operations that need embeddings
+(`add`, `search`) both return a typed `EmbeddingError` envelope. They do not
+crash the server.
+
+If the Gemini API returns a rate limit (HTTP 429 / `RESOURCE_EXHAUSTED` /
+quota exceeded), the embedder **retries forever with exponential backoff**
+(starting at 2s, doubling each attempt, with jitter). This means temporary
+rate limits are absorbed without surfacing an error to the caller. The request
+will block until the rate limit clears or the API becomes reachable again.
 
 Crucially, `list` doesn't need an embedding call — it just lists Qdrant
 payloads filtered by project — so it keeps working during an embedding
@@ -218,6 +224,11 @@ outage. The same is true for `delete` (id lookup only, no embedding).
 From the CLI, an `EmbeddingError` surfaces as exit code 5
 (`CliRemoteError`). From an MCP client (OpenCode), it surfaces as an
 `isError=True` response that the model can read and relay to the user.
+
+The base delay for exponential backoff is configurable via the
+`EMBEDDING_BASE_DELAY` environment variable (default: 2.0 seconds). There is
+no maximum retry count and no maximum delay cap — retries continue
+indefinitely until the request succeeds or a non-rate-limit error occurs.
 
 ### The `int` container exits with a `Settings` validation error on first start
 
@@ -284,7 +295,7 @@ tests are opt-in via `--run-live` (and require a real `GEMINI_API_KEY`).
 | `curl :8000/healthz` → connection refused | The `int` container isn't up, or port 8000 is bound by something else on the host. |
 | OpenCode `int_search` (tool `search`) returns `AuthError` | The `API_KEY` env var exported in the shell launching OpenCode doesn't match the server's `API_KEY` in `.env`. |
 | `int` logs `Failed to create Qdrant collection` | A prior collection exists at a different dimension. Wipe the volume (`docker compose down -v`) and restart. |
-| All embeddings tools return `EmbeddingError` | Likely a Gemini API issue — check `GEMINI_API_KEY`, quota, network reachability to `generativelanguage.googleapis.com`. |
+| All embeddings tools return `EmbeddingError` | Non-rate-limit Gemini API issue — check `GEMINI_API_KEY`, auth, network reachability to `generativelanguage.googleapis.com`. Rate limits (429/quota) are retried indefinitely with exponential backoff. |
 | `int-cli` exits 4 (`CliConnectionError`) | `INT_SERVER_URL` is wrong, the server isn't up, or the host can't reach itself on loopback (firewall / WSL2 quirks). |
 
 ## v1 boundaries (what's intentionally not in scope)

@@ -93,6 +93,9 @@ def add(
     project: Annotated[str, typer.Option("--project", help="Project scoping the memory.")],
     type: Annotated[str, typer.Option("--type", help="Free-text type tag (e.g. architecture).")],
     content: Annotated[str, typer.Option("--content", help="Memory content text.")],
+    summary: Annotated[
+        str | None, typer.Option("--summary", help="Optional one-line summary for list views.")
+    ] = None,
     server_url: Annotated[
         str | None, typer.Option("--server-url", help="Overrides INT_SERVER_URL.")
     ] = None,
@@ -102,7 +105,7 @@ def add(
 
     async def _go() -> None:
         async with session(server_url=server_url, api_key=api_key) as s:
-            mid = await call_add(s, project=project, type_=type, content=content)
+            mid = await call_add(s, project=project, type_=type, content=content, summary=summary)
         typer.echo(mid)
 
     _run(_go())
@@ -223,36 +226,13 @@ def import_cmd(
                 if not content:
                     typer.secho(f"  {i}/{len(items)} SKIP (empty content)", fg=typer.colors.YELLOW)
                     continue
-                
-                # Retry with exponential backoff for rate limits
-                max_retries = 5
-                base_delay = 2.0  # seconds
-                for attempt in range(max_retries):
-                    try:
-                        mid = await call_add(s, project=project, type_=type_, content=content)
-                        typer.echo(f"  {i}/{len(items)} OK id={mid} type={type_}")
-                        imported += 1
-                        break
-                    except Exception as e:
-                        err_str = str(e).lower()
-                        is_rate_limit = (
-                            "429" in err_str
-                            or "resource_exhausted" in err_str
-                            or "quota" in err_str
-                        )
-                        if is_rate_limit and attempt < max_retries - 1:
-                            delay = base_delay * (2 ** attempt)
-                            msg = (
-                                f"  {i}/{len(items)} RATE LIMITED, "
-                                f"retrying in {delay:.0f}s "
-                                f"(attempt {attempt+1}/{max_retries})"
-                            )
-                            typer.secho(msg, fg=typer.colors.YELLOW)
-                            await asyncio.sleep(delay)
-                            continue
-                        typer.secho(f"  {i}/{len(items)} FAILED: {e}", fg=typer.colors.RED)
-                        failed += 1
-                        break
+                try:
+                    mid = await call_add(s, project=project, type_=type_, content=content)
+                    typer.echo(f"  {i}/{len(items)} OK id={mid} type={type_}")
+                    imported += 1
+                except Exception as e:
+                    typer.secho(f"  {i}/{len(items)} FAILED: {e}", fg=typer.colors.RED)
+                    failed += 1
             typer.echo(f"\nImport complete: {imported} imported, {failed} failed.")
 
     _run(_go())
@@ -441,7 +421,7 @@ def _print_results(results: list[dict[str, Any]]) -> None:
 
 
 def _print_metadata(items: list[dict[str, Any]]) -> None:
-    """Human-readable metadata rows: created_at, type, id (no content)."""
+    """Human-readable metadata rows: created_at, type, id, summary (no content)."""
     if not items:
         typer.echo("(no memories)")
         return
@@ -452,7 +432,14 @@ def _print_metadata(items: list[dict[str, Any]]) -> None:
             created = created.split(".")[0]
         type_ = it.get("type", "")
         mid = it.get("id", "")
-        typer.echo(f"  {created}  {type_:<18}  {mid}")
+        summary = it.get("summary", "")
+        if summary:
+            # Truncate summary for table display
+            summary_display = (summary[:120] + "…") if len(summary) > 120 else summary
+            summary_display = summary_display.replace("\n", " ")
+            typer.echo(f"  {created}  {type_:<18}  {mid}  {summary_display}")
+        else:
+            typer.echo(f"  {created}  {type_:<18}  {mid}")
 
 
 def _write_markdown(output_path: str, project: str, items: list[dict[str, Any]]) -> None:

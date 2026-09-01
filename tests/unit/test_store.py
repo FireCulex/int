@@ -226,7 +226,7 @@ def test_add_stores_vector_and_memory() -> None:
     from int.models import Memory
 
     store, client = _make_store(dim=8)
-    m = Memory(project="p", type="command", content="npm test")
+    m = Memory(project="p", type="command", content="npm test", summary="runs tests")
     vec = [1.0] + [0.0] * 7
     mid = store.add(m, vec)
     assert mid == m.id
@@ -235,6 +235,7 @@ def test_add_stores_vector_and_memory() -> None:
     assert stored.payload["project"] == "p"
     assert stored.payload["type"] == "command"
     assert stored.payload["content"] == "npm test"
+    assert stored.payload["summary"] == "runs tests"
     assert "created_at" in stored.payload
     assert stored.vector == vec
 
@@ -331,11 +332,11 @@ def test_list_returns_metadata_only_no_content_no_vector() -> None:
 
     store, _ = _make_store(dim=4)
     store.add(
-        Memory(project="p", type="command", content="npm test"),
+        Memory(project="p", type="command", content="npm test", summary="test summary"),
         [1.0, 0.0, 0.0, 0.0],
     )
     store.add(
-        Memory(project="p", type="architecture", content="flask"),
+        Memory(project="p", type="architecture", content="flask", summary="web framework"),
         [0.0, 1.0, 0.0, 0.0],
     )
     metas = store.list("p")
@@ -346,6 +347,7 @@ def test_list_returns_metadata_only_no_content_no_vector() -> None:
         with pytest.raises(AttributeError):
             _ = m.content
     assert {m.type for m in metas} == {"command", "architecture"}
+    assert {m.summary for m in metas} == {"test summary", "web framework"}
 
 
 def test_list_filters_by_project() -> None:
@@ -486,8 +488,8 @@ def test_get_returns_memory_with_content() -> None:
     from int.models import Memory
 
     store, _ = _make_store(dim=4)
-    mid1 = store.add(Memory(project="p", type="t1", content="c1"), [1.0, 0.0, 0.0, 0.0])
-    store.add(Memory(project="p", type="t2", content="c2"), [1.0, 0.0, 0.0, 0.0])
+    mid1 = store.add(Memory(project="p", type="t1", content="c1", summary="first"), [1.0, 0.0, 0.0, 0.0])
+    store.add(Memory(project="p", type="t2", content="c2", summary="second"), [1.0, 0.0, 0.0, 0.0])
 
     result = store.get(mid1)
 
@@ -495,6 +497,7 @@ def test_get_returns_memory_with_content() -> None:
     assert result.id == mid1
     assert result.content == "c1"
     assert result.type == "t1"
+    assert result.summary == "first"
     assert result.project == "p"
 
 
@@ -515,17 +518,34 @@ def test_get_all_returns_memories_with_content() -> None:
     from int.models import Memory
 
     store, _ = _make_store(dim=4)
-    mid1 = store.add(Memory(project="p", type="t1", content="c1"), [1.0, 0.0, 0.0, 0.0])
-    mid2 = store.add(Memory(project="p", type="t2", content="c2"), [1.0, 0.0, 0.0, 0.0])
+    mid1 = store.add(Memory(project="p", type="t1", content="c1", summary="first"), [1.0, 0.0, 0.0, 0.0])
+    mid2 = store.add(Memory(project="p", type="t2", content="c2", summary="second"), [1.0, 0.0, 0.0, 0.0])
 
     memories = store.get_all("p")
 
     assert len(memories) == 2
     assert {m.id for m in memories} == {mid1, mid2}
     assert {m.content for m in memories} == {"c1", "c2"}
+    assert {m.summary for m in memories} == {"first", "second"}
     assert all(m.project == "p" for m in memories)
 
 
 def test_get_all_empty_project_returns_empty() -> None:
     store, _ = _make_store(dim=4)
     assert store.get_all("empty") == []
+
+
+def test_get_all_with_vectors_returns_summary() -> None:
+    from int.models import Memory
+
+    store, _ = _make_store(dim=4)
+    mid1 = store.add(Memory(project="p", type="t1", content="c1", summary="first"), [1.0, 0.0, 0.0, 0.0])
+    mid2 = store.add(Memory(project="p", type="t2", content="c2", summary="second"), [1.0, 0.0, 0.0, 0.0])
+
+    results = store.get_all_with_vectors("p")
+
+    assert len(results) == 2
+    for memory, vector in results:
+        assert memory.id in {mid1, mid2}
+        assert memory.summary in {"first", "second"}
+        assert len(vector) == 4

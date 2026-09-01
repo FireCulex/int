@@ -155,6 +155,7 @@ class QdrantStore:
                             "project": memory.project,
                             "type": memory.type,
                             "content": memory.content,
+                            "summary": memory.summary,
                             "created_at": memory.created_at.isoformat(),
                         },
                     }
@@ -200,6 +201,7 @@ class QdrantStore:
                         project=p["project"],
                         type=p["type"],
                         content=p["content"],
+                        summary=p.get("summary"),
                         created_at=datetime.fromisoformat(p["created_at"]),
                     )
                     vector = list(point.vector) if point.vector is not None else []
@@ -328,6 +330,7 @@ class QdrantStore:
                         MemoryMetadata(
                             id=_to_uuid(point.id),
                             type=p["type"],
+                            summary=p.get("summary"),
                             created_at=datetime.fromisoformat(p["created_at"]),
                         )
                     )
@@ -366,6 +369,7 @@ class QdrantStore:
                             project=p["project"],
                             type=p["type"],
                             content=p["content"],
+                            summary=p.get("summary"),
                             created_at=datetime.fromisoformat(p["created_at"]),
                         )
                     )
@@ -398,6 +402,7 @@ class QdrantStore:
             project=p["project"],
             type=p["type"],
             content=p["content"],
+            summary=p.get("summary"),
             created_at=datetime.fromisoformat(p["created_at"]),
         )
 

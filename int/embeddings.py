@@ -1,10 +1,11 @@
 """int.embeddings — Gemini embedding wrapper.
 
 The single place where:
-- `task_type` is set (`RETRIEVAL_DOCUMENT` for add, `RETRIEVAL_QUERY` for search)
+- `task_type` is set (`RETRIEVAL_DOCUMENT` for add, `RETRIAL_QUERY` for search)
 - L2 normalization happens (gemini-embedding-001 does not auto-normalize
   non-3072 dimensions; cosine similarity requires unit vectors)
 - Gemini API failures translate to our typed `EmbeddingError`
+- Rate limits (429/RESOURCE_EXHAUSTED/quota) retry forever with exponential backoff
 
 Callers (tools, store, CLI) never specify task_type or normalization — both are
 baked into this wrapper. Swap to a local embedder in v2 by replacing this
@@ -19,6 +20,8 @@ is synchronous and awaiting its return value raises
 
 from __future__ import annotations
 
+import asyncio
+import random
 from collections.abc import Iterable
 from typing import Any, Protocol
 
@@ -59,12 +62,16 @@ class Embedder:
         client: _ClientLike,
         model: str,
         dimension: int,
+        base_delay: float = 2.0,
     ) -> None:
         if dimension <= 0:
             raise ValueError(f"dimension must be positive, got {dimension}")
+        if base_delay <= 0:
+            raise ValueError(f"base_delay must be positive, got {base_delay}")
         self._client = client
         self._model = model
         self._dim = dimension
+        self._base_delay = base_delay
 
     @property
     def dimension(self) -> int:
@@ -88,26 +95,40 @@ class Embedder:
         except ImportError as e:
             raise EmbeddingError("google-genai SDK not installed") from e
 
-        try:
-            config = types.EmbedContentConfig(
-                task_type=task_type,
-                output_dimensionality=self._dim,
-            )
-            result = await self._client.models.embed_content(
-                model=self._model,
-                contents=[content],
-                config=config,
-            )
-        except Exception as e:
-            raise EmbeddingError(f"Gemini embed_content call failed: {e}") from e
+        config = types.EmbedContentConfig(
+            task_type=task_type,
+            output_dimensionality=self._dim,
+        )
 
-        embeddings = getattr(result, "embeddings", None)
-        if not embeddings:
-            raise EmbeddingError("Gemini returned no embeddings")
-        values = getattr(embeddings[0], "values", None)
-        if values is None:
-            raise EmbeddingError("Gemini returned an embedding without values")
-        return list(values)
+        attempt = 0
+        while True:
+            try:
+                result = await self._client.models.embed_content(
+                    model=self._model,
+                    contents=[content],
+                    config=config,
+                )
+            except Exception as e:
+                err_str = str(e).lower()
+                is_rate_limit = (
+                    "429" in err_str
+                    or "resource_exhausted" in err_str
+                    or "quota" in err_str
+                )
+                if is_rate_limit:
+                    delay = self._base_delay * (2 ** attempt) * random.uniform(0.8, 1.2)
+                    await asyncio.sleep(delay)
+                    attempt += 1
+                    continue
+                raise EmbeddingError(f"Gemini embed_content call failed: {e}") from e
+
+            embeddings = getattr(result, "embeddings", None)
+            if not embeddings:
+                raise EmbeddingError("Gemini returned no embeddings")
+            values = getattr(embeddings[0], "values", None)
+            if values is None:
+                raise EmbeddingError("Gemini returned an embedding without values")
+            return list(values)
 
     @staticmethod
     def _normalize(values: Iterable[float], *, content: str) -> list[float]:

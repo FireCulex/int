@@ -42,6 +42,13 @@ class Settings(BaseSettings):
         default=768,
         description="Output embedding dimension. Changing invalidates stored vectors.",
     )
+    embedding_base_delay: float = Field(
+        default=2.0,
+        description=(
+            "Base delay (seconds) for exponential backoff on rate limits. "
+            "No max retries, no max delay."
+        ),
+    )
 
     # --- Qdrant ---
     qdrant_url: str = Field(

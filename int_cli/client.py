@@ -197,11 +197,13 @@ async def call_add(
     project: str,
     type_: str,
     content: str,
+    summary: str | None = None,
 ) -> str:
     """Issue the `add` tool. Returns the new memory's UUID string."""
-    out = await session.call_tool(
-        "add", arguments={"project": project, "type": type_, "content": content}
-    )
+    args = {"project": project, "type": type_, "content": content}
+    if summary is not None:
+        args["summary"] = summary
+    out = await session.call_tool("add", arguments=args)
     return _require_ok(out, "add")
 
 

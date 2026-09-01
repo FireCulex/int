@@ -122,12 +122,14 @@ class ToolsRegistry:
 
     def list_tools(self) -> builtins.list[ToolDescriptor]:
         return [
-            ToolDescriptor(
+ToolDescriptor(
                 name="add",
                 description=(
                     "Store a memory in a project. The content is embedded "
                     "(RETRIEVAL_DOCUMENT task_type) and persisted to the project's "
-                    "memory store. Returns the new memory's UUID."
+                    "memory store. The summary is a one-line brief summary "
+                    "(120 chars max) written by the assistant for quick scanning "
+                    "in list views. Returns the new memory's UUID."
                 ),
                 input_schema={
                     "type": "object",
@@ -144,6 +146,13 @@ class ToolsRegistry:
                             ),
                         },
                         "content": {"type": "string", "minLength": 1},
+                        "summary": {
+                            "type": "string",
+                            "description": (
+                                "Optional one-line summary written by the assistant "
+                                "for quick scanning in list views."
+                            ),
+                        },
                     },
                 },
             ),
@@ -244,6 +253,9 @@ class ToolsRegistry:
         project = _require_str(args.get("project"), field="project")
         type_ = _require_str(args.get("type"), field="type")
         content = _require_str(args.get("content"), field="content")
+        summary = args.get("summary")
+        if summary is not None:
+            summary = _require_str(summary, field="summary", allow_empty=True)
         self._require_project_exists(project)
 
         vec = await self._embedder.embed_document(content)
@@ -252,6 +264,7 @@ class ToolsRegistry:
             project=project,
             type=type_,
             content=content,
+            summary=summary,
         )
         mid = self._store.add(memory, vec)
         return str(mid)

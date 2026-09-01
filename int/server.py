@@ -76,6 +76,7 @@ def _default_real_deps(
     gemini_api_key: str,
     gemini_embedding_model: str,
     gemini_embedding_dimensions: int,
+    embedding_base_delay: float,
     qdrant_url: str,
     qdrant_collection: str,
 ) -> _AppDeps:
@@ -104,6 +105,7 @@ def _default_real_deps(
         client=genai_client.aio,
         model=gemini_embedding_model,
         dimension=gemini_embedding_dimensions,
+        base_delay=embedding_base_delay,
     )
     tools = ToolsRegistry(store=store, embedder=embedder)
     mcp_fast = _build_mcp_fast(tools, store=store)
@@ -330,6 +332,7 @@ def build_app(
             gemini_api_key=settings.gemini_api_key,
             gemini_embedding_model=settings.gemini_embedding_model,
             gemini_embedding_dimensions=settings.gemini_embedding_dimensions,
+            embedding_base_delay=settings.embedding_base_delay,
             qdrant_url=settings.qdrant_url,
             qdrant_collection=settings.qdrant_collection,
         )

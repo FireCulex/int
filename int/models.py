@@ -52,6 +52,10 @@ class Memory(BaseModel):
         ),
     )
     content: str = Field(..., min_length=1, description="The memory body.")
+    summary: str | None = Field(
+        default=None,
+        description="Optional one-line summary for quick scanning in list views.",
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="UTC creation timestamp (tz-aware).",
@@ -77,6 +81,7 @@ class MemoryMetadata(BaseModel):
 
     id: UUID
     type: str
+    summary: str | None = None
     created_at: datetime
 
 

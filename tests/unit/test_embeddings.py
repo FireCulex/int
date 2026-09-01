@@ -18,10 +18,15 @@ via the --run-live marker).
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 
 import numpy as np
 import pytest
+
+from int.embeddings import Embedder
+from int.models import EmbeddingError
 
 
 class FakeEmbeddings:
@@ -74,10 +79,12 @@ def _config_dim(fake_embedder: Any) -> int | None:
     return getattr(cfg, "output_dimensionality", None) if cfg is not None else None
 
 
-def _make_embedder(client: Any, dim: int = 768, model: str = "gemini-embedding-001") -> Any:
+def _make_embedder(
+    client: Any, dim: int = 768, model: str = "gemini-embedding-001", base_delay: float = 2.0
+) -> Any:
     from int.embeddings import Embedder
 
-    return Embedder(client=client, model=model, dimension=dim)
+    return Embedder(client=client, model=model, dimension=dim, base_delay=base_delay)
 
 
 def test_embed_document_uses_retrieval_document_task_type() -> None:
@@ -233,3 +240,124 @@ def test_length_of_returned_vector_matches_dimension() -> None:
 
     out = asyncio.run(e.embed_query("q"))
     assert len(out) == 512
+
+
+class FakeRetryClient:
+    """Client that fails N times then succeeds, recording attempt count."""
+
+    def __init__(
+        self,
+        *,
+        fail_count: int,
+        fail_error: Exception,
+        success_values: list[float],
+    ) -> None:
+        self._fail_count = fail_count
+        self._fail_error = fail_error
+        self._success_values = success_values
+        self._attempts = 0
+        self.models = type("M", (), {})()
+        self.models.embed_content = self._embed_content
+        self.aio = self
+
+    async def _embed_content(self, *, model: str, contents: list[str], config: Any = None) -> Any:
+        self._attempts += 1
+        if self._attempts <= self._fail_count:
+            raise self._fail_error
+        cls = type(
+            "Result",
+            (),
+            {"embeddings": [type("E", (), {"values": list(self._success_values)})()]},
+        )
+        return cls()
+
+    @property
+    def attempts(self) -> int:
+        return self._attempts
+
+
+def test_retry_on_rate_limit_then_succeeds() -> None:
+    """Rate limit (429) triggers retry; succeeds on 2nd attempt."""
+
+    client = FakeRetryClient(
+        fail_count=1,
+        fail_error=RuntimeError("429 RESOURCE_EXHAUSTED quota exceeded"),
+        success_values=[1.0, 0.0, 0.0],
+    )
+    e = Embedder(client=client, model="test", dimension=3, base_delay=0.01)
+
+    out = asyncio.run(e.embed_document("hello"))
+
+    assert client.attempts == 2
+    assert len(out) == 3
+
+
+def test_retry_on_quota_error_then_succeeds() -> None:
+    """Quota error triggers retry; succeeds on 3rd attempt."""
+
+    client = FakeRetryClient(
+        fail_count=2,
+        fail_error=RuntimeError("quota exceeded for model"),
+        success_values=[1.0, 0.0, 0.0],
+    )
+    e = Embedder(client=client, model="test", dimension=3, base_delay=0.01)
+
+    out = asyncio.run(e.embed_query("query"))
+
+    assert client.attempts == 3
+    assert len(out) == 3
+
+
+def test_non_rate_limit_error_no_retry() -> None:
+    """Non-rate-limit errors (e.g., auth) raise immediately without retry."""
+
+    async def failing(**kwargs: object) -> Any:
+        raise RuntimeError("401 unauthorized")
+
+    class Client:
+        def __init__(self) -> None:
+            self.models = type("M", (), {})()
+
+    client = Client()
+    client.models.embed_content = failing
+
+    e = Embedder(client=client, model="test", dimension=3, base_delay=0.01)
+
+    with pytest.raises(EmbeddingError) as exc:
+        asyncio.run(e.embed_document("x"))
+
+    assert "401 unauthorized" in str(exc.value)
+
+
+def test_backoff_increases_exponentially() -> None:
+    """Delay between retries increases exponentially (with jitter)."""
+
+    delays: list[float] = []
+
+    async def slow_fail(**kwargs: object) -> Any:
+        delays.append(time.monotonic())
+        if len(delays) <= 3:
+            raise RuntimeError("429 rate limit")
+        cls = type(
+            "Result",
+            (),
+            {"embeddings": [type("E", (), {"values": [1.0, 0.0, 0.0]})()]},
+        )
+        return cls()
+
+    class Client:
+        def __init__(self) -> None:
+            self.models = type("M", (), {})()
+
+    client = Client()
+    client.models.embed_content = slow_fail
+
+    e = Embedder(client=client, model="test", dimension=3, base_delay=0.05)
+
+    asyncio.run(e.embed_document("x"))
+
+    assert len(delays) == 4  # initial + 3 retries
+    # Check intervals roughly follow exponential pattern (with jitter tolerance)
+    intervals = [delays[i + 1] - delays[i] for i in range(len(delays) - 1)]
+    assert intervals[1] > intervals[0] * 1.5  # 2nd delay > 1.5x 1st
+    assert intervals[2] > intervals[1] * 1.5  # 3rd delay > 1.5x 2nd

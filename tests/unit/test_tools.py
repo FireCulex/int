@@ -28,7 +28,7 @@ import pytest
 
 class FakeStore:
     def __init__(self, *, known_projects: list[str] | None = None) -> None:
-        self.memories: dict[uuid.UUID, tuple[str, str, str]] = {}
+        self.memories: dict[uuid.UUID, tuple[str, str, str, str | None]] = {}
         self.add_calls: list[tuple[Any, list[float]]] = []
         self.delete_calls: list[uuid.UUID] = []
         self.search_calls: list[tuple[str, list[float], int]] = []
@@ -39,7 +39,7 @@ class FakeStore:
 
     def add(self, memory: Any, embedding: list[float]) -> uuid.UUID:
         self.add_calls.append((memory, list(embedding)))
-        self.memories[memory.id] = (memory.project, memory.type, memory.content)
+        self.memories[memory.id] = (memory.project, memory.type, memory.content, memory.summary)
         self._known_projects.add(memory.project)
         return memory.id
 
@@ -74,23 +74,24 @@ class FakeStore:
             MemoryMetadata(
                 id=mid,
                 type=t,
+                summary=s,
                 created_at=datetime.now(UTC),
             )
-            for mid, (p, t, c) in self.memories.items()  # noqa: B007
+            for mid, (p, t, c, s) in self.memories.items()  # noqa: B007
             if p == project
         ]
 
     def get(self, memory_id: uuid.UUID) -> Any | None:
         if memory_id not in self.memories:
             return None
-        p, t, c = self.memories[memory_id]
+        p, t, c, s = self.memories[memory_id]
         from datetime import UTC, datetime
 
         from int.models import Memory
-        return Memory(id=memory_id, project=p, type=t, content=c, created_at=datetime.now(UTC))
+        return Memory(id=memory_id, project=p, type=t, content=c, summary=s, created_at=datetime.now(UTC))
 
     def project_names(self) -> list[str]:
-        names = self._known_projects | {p for (p, _, _) in self.memories.values()}
+        names = self._known_projects | {p for (p, _, _, _) in self.memories.values()}
         return sorted(names)
 
 
@@ -177,7 +178,27 @@ async def test_add_calls_embedder_with_retrieval_document_and_stores_memory() ->
     assert memory.project == "pianoweb"
     assert memory.type == "architecture"
     assert memory.content == "flask backend"
+    assert memory.summary is None
     assert vec == [1.0] + [0.0] * 767
+
+
+@pytest.mark.asyncio
+async def test_add_with_summary_stores_summary() -> None:
+    tools, store, embedder = _make_tools()
+    mid = await tools.call(
+        "add",
+        {
+            "project": "pianoweb",
+            "type": "architecture",
+            "content": "flask backend with SQLAlchemy",
+            "summary": "Flask backend using SQLAlchemy ORM",
+        },
+    )
+    assert isinstance(mid, str)
+    assert uuid.UUID(mid)
+    assert len(store.add_calls) == 1
+    memory, _ = store.add_calls[0]
+    assert memory.summary == "Flask backend using SQLAlchemy ORM"
 
 
 @pytest.mark.asyncio
@@ -225,7 +246,7 @@ async def test_delete_existing_returns_true() -> None:
 
     tools, store, _ = _make_tools()
     m = Memory(project="p", type="t", content="x")
-    store.memories[m.id] = (m.project, m.type, m.content)
+    store.memories[m.id] = (m.project, m.type, m.content, m.summary)
     ok = await tools.call("delete", {"memory_id": str(m.id)})
     assert ok is True
     assert store.delete_calls == [m.id]
@@ -358,13 +379,35 @@ async def test_list_returns_metadata_only_no_embedding_call() -> None:
     from int.models import Memory
 
     m = Memory(project="pianoweb", type="t", content="x")
-    store.memories[m.id] = (m.project, m.type, m.content)
+    store.memories[m.id] = (m.project, m.type, m.content, m.summary)
     metas = await tools.call("list", {"project": "pianoweb"})
     assert isinstance(metas, list)
     assert all(isinstance(m, MemoryMetadata) for m in metas)
     # CRITICAL: list must NOT call the embedder -- no embedding work happens.
     assert embedder.doc_calls == []
     assert embedder.query_calls == []
+
+
+@pytest.mark.asyncio
+async def test_list_returns_summary_in_metadata() -> None:
+    from int.models import Memory, MemoryMetadata
+
+    tools, store, _ = _make_tools()
+
+    m1 = Memory(project="pianoweb", type="t", content="x", summary="first summary")
+    m2 = Memory(project="pianoweb", type="t", content="y")  # no summary
+    store.memories[m1.id] = (m1.project, m1.type, m1.content, m1.summary)
+    store.memories[m2.id] = (m2.project, m2.type, m2.content, m2.summary)
+
+    metas = await tools.call("list", {"project": "pianoweb"})
+
+    assert len(metas) == 2
+    for meta in metas:
+        assert isinstance(meta, MemoryMetadata)
+        if meta.id == m1.id:
+            assert meta.summary == "first summary"
+        else:
+            assert meta.summary is None
 
 
 @pytest.mark.asyncio
@@ -395,7 +438,7 @@ async def test_get_returns_memory_with_content() -> None:
     tools, store, _ = _make_tools()
 
     m = Memory(project="pianoweb", type="t", content="x")
-    store.memories[m.id] = (m.project, m.type, m.content)
+    store.memories[m.id] = (m.project, m.type, m.content, m.summary)
 
     result = await tools.call("get", {"memory_id": str(m.id)})
 
@@ -403,6 +446,22 @@ async def test_get_returns_memory_with_content() -> None:
     assert result.id == m.id
     assert result.content == "x"
     assert result.type == "t"
+    assert result.summary is None
+
+
+@pytest.mark.asyncio
+async def test_get_returns_summary_when_stored() -> None:
+    from int.models import Memory
+
+    tools, store, _ = _make_tools()
+
+    m = Memory(project="pianoweb", type="t", content="x", summary="test summary")
+    store.memories[m.id] = (m.project, m.type, m.content, m.summary)
+
+    result = await tools.call("get", {"memory_id": str(m.id)})
+
+    assert isinstance(result, Memory)
+    assert result.summary == "test summary"
 
 
 @pytest.mark.asyncio

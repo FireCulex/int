@@ -114,6 +114,7 @@ class Memory(BaseModel):
     project: str
     type: str  # "architecture" | "preference" | "command" | "learned-pattern" | ...
     content: str
+    summary: str | None = None  # optional one-line summary for list views
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -171,10 +172,10 @@ Projects are created via the CLI (`int-cli create`), never by the MCP surface. A
 
 | Tool | Inputs | Output | Description |
 |---|---|---|---|
-| `add` | `project: str`, `type: str`, `content: str` | `memory_id: str` (UUID) | Embed content as `RETRIEVAL_DOCUMENT`, store in Qdrant, return new ID. Requires `project` to already exist. |
+| `add` | `project: str`, `type: str`, `content: str`, `summary?: str` | `memory_id: str` (UUID) | Embed content as `RETRIEVAL_DOCUMENT`, store in Qdrant, return new ID. Optional `summary` for quick scanning in list views. Requires `project` to already exist. |
 | `delete` | `memory_id: str` | `deleted: bool` | Remove a memory by ID. Idempotent on missing (returns `false`). |
 | `search` | `project: str`, `query: str`, `limit: int = 5` | `list[SearchResult]` (content, score, id, type) | Embed query as `RETRIEVAL_QUERY`, cosine search Qdrant filtered by `project`. Requires `project` to already exist. |
-| `list` | `project: str` | `list[Memory]` (id, type, created_at; **no content**) | List memories in a project — metadata only, no embedding call, no content returned. Requires `project` to already exist. |
+| `list` | `project: str` | `list[MemoryMetadata]` (id, type, summary?, created_at; **no content**) | List memories in a project — metadata only, no embedding call, no content returned. Optional `summary` included when present. Requires `project` to already exist. |
 | `get` | `memory_id: str` | `Memory \| null` | Fetch a single memory by ID with full content. No embedding call. |
 
 **Auth:** every tool call requires `API_KEY` header matching server's `API_KEY`. Missing/mismatched → 401.
@@ -262,7 +263,7 @@ Specific, testable — every line maps to a verification:
 3. **Recall without re-discovery.** Given a stored architecture synthesis for a project, a semantic query returns it in the top 3 results with cosine similarity ≥ 0.6. Verified by an integration test using a representative synthesis as fixture content.
 4. **Single container dependency.** `docker compose up` from a clean clone brings up a working server + Qdrant within 60s on a warm cache. First-run (incl. Docker image pull) ≤ 5 min.
 5. **Env-driven config verified.** Changing `GEMINI_EMBEDDING_DIMENSIONS` creates a new Qdrant collection with that size; changing `API_KEY` rejects clients using the old key. Both covered by integration tests.
-6. **Offline-degrade is explicit.** If `GEMINI_API_KEY` is missing or the API is unreachable, `add`/`search` return a typed `EmbeddingError` (not a crash). `list` (no embedding needed) still works.
+6. **Offline-degrade is explicit.** If `GEMINI_API_KEY` is missing or the API is unreachable, `add`/`search` return a typed `EmbeddingError` (not a crash). Rate limits (429/RESOURCE_EXHAUSTED/quota) are retried indefinitely with exponential backoff (base delay 2s, doubling each attempt, with jitter) — no max retries, no max delay. `list` (no embedding needed) still works.
 7. **AGENTS.md policy is in place.** The repo's `AGENTS.md` contains the search-first rule and a salience policy ("save when the cost to re-discover > cost to save"). Read-only check.
 8. **CLI inspection + project creation works.** All four CRUD operations reachable from `int-cli` for debugging/operational access without an MCP client, and `int-cli create --project <name>` materializes a project so the MCP surface accepts it.
 9. **Public repo hygiene.** `docker compose up && uv run pytest` works from a fresh clone. No `.env` present in git; `.env.example` documented.
