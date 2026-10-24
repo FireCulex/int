@@ -257,9 +257,7 @@ def copy_cmd(
     ] = None,
     preserve_timestamps: Annotated[
         bool,
-        typer.Option(
-            "--preserve-timestamps/--new-timestamps", help="Keep original created_at."
-        ),
+        typer.Option("--preserve-timestamps/--new-timestamps", help="Keep original created_at."),
     ] = True,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Count only, don't copy.")] = False,
 ) -> None:
@@ -283,13 +281,13 @@ def copy_cmd(
         # Count first
         items = store.get_all_with_vectors(source_project)
         count = len(items)
-        
+
         if count == 0:
             typer.echo(f"No memories found in project '{source_project}'.")
             return
 
         typer.echo(f"Found {count} memories in '{source_project}'.")
-        
+
         if dry_run:
             typer.echo("Dry run: skipping copy.")
             return
@@ -445,24 +443,20 @@ def _print_metadata(items: list[dict[str, Any]]) -> None:
 def _write_markdown(output_path: str, project: str, items: list[dict[str, Any]]) -> None:
     """Write memories to a Markdown file."""
     from datetime import datetime
-    
+
     with open(output_path, "w") as f:
         f.write(f"# Memories Export: {project}\n\n")
         f.write(f"Exported: {datetime.now().isoformat()}\n")
         f.write(f"Total memories: {len(items)}\n\n")
         f.write("---\n\n")
-        
+
         if not items:
             f.write("(no memories)\n")
             return
-        
+
         # Sort by created_at descending (newest first)
-        sorted_items = sorted(
-            items, 
-            key=lambda x: x.get("created_at", ""), 
-            reverse=True
-        )
-        
+        sorted_items = sorted(items, key=lambda x: x.get("created_at", ""), reverse=True)
+
         for item in sorted_items:
             created = item.get("created_at", "")
             if isinstance(created, str) and "T" in created:
@@ -471,7 +465,7 @@ def _write_markdown(output_path: str, project: str, items: list[dict[str, Any]])
             mid = item.get("id", "")
             content = item.get("content", "")
             score = item.get("score")
-            
+
             f.write(f"## {created} — {type_}\n\n")
             f.write(f"**ID:** {mid}  \n")
             if score is not None:
@@ -479,7 +473,7 @@ def _write_markdown(output_path: str, project: str, items: list[dict[str, Any]])
             f.write("\n")
             f.write(f"{content}\n\n")
             f.write("---\n\n")
-    
+
     typer.echo(f"Exported {len(items)} memories to {output_path}")
 
 
@@ -493,10 +487,10 @@ async def _export_via_direct_store(
 
     from int.config import Settings
     from int.store import QdrantStore
-    
+
     # Load settings (uses same env as server)
     settings = Settings()
-    
+
     # Create Qdrant client and store (same as server)
     # Use provided qdrant_url or fall back to settings (which may be docker-internal)
     url = qdrant_url or settings.qdrant_url
@@ -506,14 +500,14 @@ async def _export_via_direct_store(
         collection_name=settings.qdrant_collection,
         dimension=settings.gemini_embedding_dimensions,
     )
-    
+
     # Get all memories directly from store
     memories = store.get_all(project)
-    
+
     # Sort by created_at descending and limit
     memories.sort(key=lambda m: m.created_at, reverse=True)
     memories = memories[:limit]
-    
+
     # Convert to dict format matching MCP output
     return [
         {
@@ -532,13 +526,13 @@ def _parse_import_file(input_path: str) -> list[dict[str, Any]]:
     import json
     import re
     from pathlib import Path
-    
+
     path = Path(input_path)
     if not path.exists():
         raise typer.BadParameter(f"File not found: {input_path}")
-    
+
     content = path.read_text(encoding="utf-8")
-    
+
     # Try JSON first
     if path.suffix.lower() == ".json":
         try:
@@ -553,43 +547,43 @@ def _parse_import_file(input_path: str) -> list[dict[str, Any]]:
             return [data]
         except json.JSONDecodeError as e:
             raise typer.BadParameter(f"Invalid JSON: {e}") from e
-    
+
     # Parse Markdown format (as produced by export command)
     # Format:
     # ## {created} — {type}
     # **ID:** {mid}
     # **Score:** {score}  (optional)
-    # 
+    #
     # {content}
     # ---
     items = []
-    
+
     # Split by --- delimiter
     sections = content.split("\n---\n")
     for section in sections:
         section = section.strip()
         if not section or section.startswith("# Memories Export"):
             continue
-        
+
         lines = section.split("\n")
         if not lines:
             continue
-        
+
         # First non-empty line should be: ## {created} — {type}
         header_idx = 0
         while header_idx < len(lines) and lines[header_idx] == "":
             header_idx += 1
         if header_idx >= len(lines):
             continue
-        
+
         first_line = lines[header_idx]
         match = re.match(r"^##\s+(.+?)\s+—\s+(.+)$", first_line)
         if not match:
             continue
-        
+
         created_str = match.group(1).strip()
         type_ = match.group(2).strip()
-        
+
         # Parse metadata lines (ID, Score) - skip them when finding content
         mid = ""
         content_start_idx = header_idx + 1
@@ -609,21 +603,23 @@ def _parse_import_file(input_path: str) -> list[dict[str, Any]]:
                 # Content line before any metadata - treat as content start
                 content_start_idx = i
                 break
-        
+
         # Content starts after the blank line following metadata
         content_lines = lines[content_start_idx:]
         content = "\n".join(content_lines).strip()
         if content.endswith("---"):
             content = content[:-3].strip()
-        
+
         if content:
-            items.append({
-                "id": mid,
-                "type": type_,
-                "content": content,
-                "created_at": created_str,
-            })
-    
+            items.append(
+                {
+                    "id": mid,
+                    "type": type_,
+                    "content": content,
+                    "created_at": created_str,
+                }
+            )
+
     return items
 
 

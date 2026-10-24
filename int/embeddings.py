@@ -111,12 +111,10 @@ class Embedder:
             except Exception as e:
                 err_str = str(e).lower()
                 is_rate_limit = (
-                    "429" in err_str
-                    or "resource_exhausted" in err_str
-                    or "quota" in err_str
+                    "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str
                 )
                 if is_rate_limit:
-                    delay = self._base_delay * (2 ** attempt) * random.uniform(0.8, 1.2)
+                    delay = self._base_delay * (2**attempt) * random.uniform(0.8, 1.2)
                     await asyncio.sleep(delay)
                     attempt += 1
                     continue
