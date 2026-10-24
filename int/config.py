@@ -66,3 +66,31 @@ class Settings(BaseSettings):
 
     # --- Logging ---
     log_level: str = Field(default="INFO", description="Logging level.")
+
+
+class CliEnv(BaseSettings):
+    """Minimal env view for `int_cli` (client-side settings).
+
+    Deliberately separate from :class:`Settings`: the CLI must resolve
+    `API_KEY` without also requiring the server-only `GEMINI_API_KEY`, so
+    reusing `Settings` here would make `uv run int-cli ...` fail for anyone
+    who has no Gemini key. Every field is optional; `int_cli.client` decides
+    what is actually required.
+
+    Reads `os.environ` first and falls back to `.env`, matching how the
+    direct-Qdrant subcommands (`create`/`copy`/`purge`/`export`/`import`)
+    already load `Settings` -- the CLI should not be half-dotenv, half-env.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    api_key: str | None = Field(
+        default=None, description="Shared static secret for the int server."
+    )
+    int_server_url: str | None = Field(
+        default=None, description="MCP endpoint URL used by int_cli."
+    )

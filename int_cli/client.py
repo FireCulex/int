@@ -19,10 +19,14 @@ can stay declarative and the seam is explicitly mockable for unit tests.
 Configuration:
 - `INT_SERVER_URL`: full URL of the MCP endpoint (default
   `http://localhost:8000/mcp`). Same value a human would pass to an MCP
-  client config. Read here (not in `int.config`, which is server-side)
-  because this is a client-side concern.
+  client config.
 - `API_KEY`:         shared static secret; sent in the `API_KEY` header on
   every request, exactly like the MCP clients.
+
+Both resolve through `int.config.CliEnv`, which reads environment variables
+first and falls back to the repo `.env` -- so `int-cli list` sees the same
+`API_KEY` that `int-cli create` already loads. Explicit `--server-url` /
+`--api-key` flags still win over both.
 
 Errors:
 - Missing `API_KEY` -> `CliConfigError` (fail fast before any network call).
@@ -36,13 +40,14 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 from collections.abc import AsyncIterator
 from typing import Any
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.shared.exceptions import McpError
+
+from int.config import CliEnv
 
 # --- Errors -----------------------------------------------------------------
 
@@ -83,20 +88,29 @@ class CliRemoteError(CliError):
 DEFAULT_SERVER_URL = "http://localhost:8000/mcp"
 
 
+#: Path to the dotenv file consulted after real environment variables.
+#: Neutralized (set to ``None``) by unit tests so a developer's repo-root
+#: `.env` cannot change the outcome of "missing API_KEY" assertions.
+ENV_FILE: str | None = ".env"
+
+
 def resolve_config(
     *,
     server_url: str | None = None,
     api_key: str | None = None,
 ) -> tuple[str, str]:
-    """Resolve (server_url, api_key) from explicit args or env.
+    """Resolve (server_url, api_key) from explicit args, env, or `.env`.
 
+    Precedence: explicit argument > environment variable > `.env` > default.
     Raises CliConfigError if the API_KEY is missing/empty.
     """
-    url = server_url or os.environ.get("INT_SERVER_URL") or DEFAULT_SERVER_URL
-    key = api_key or os.environ.get("API_KEY")
+    env = CliEnv(_env_file=ENV_FILE)  # type: ignore[call-arg]  # pydantic-settings init kwarg
+    url = server_url or env.int_server_url or DEFAULT_SERVER_URL
+    key = api_key or env.api_key
     if not key:
         raise CliConfigError(
-            "API_KEY is required. Set it via the API_KEY environment variable or pass --api-key."
+            "API_KEY is required. Set it via the API_KEY environment variable, "
+            "in .env, or pass --api-key."
         )
     return url, key
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -128,6 +129,11 @@ def _patch_session_with(monkeypatch: pytest.MonkeyPatch, sess: _FakeSession) -> 
 
 def test_missing_api_key_exits_2(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
     """With API_KEY unset and no --api-key flag, every command exits 2."""
+    from int_cli import client as cli_client
+
+    # Neutralize the repo-root `.env` (present for manual docker runs) so the
+    # assertion holds on a developer machine as well as in CI.
+    monkeypatch.setattr(cli_client, "ENV_FILE", None)
     monkeypatch.delenv("API_KEY", raising=False)
     monkeypatch.delenv("INT_SERVER_URL", raising=False)
     # Even though we patch the session factory, resolve_config() runs first.
@@ -170,6 +176,39 @@ def test_explicit_api_key_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("API_KEY", "from-env")
     _, key = resolve_config(api_key="from-flag")
     assert key == "from-flag"
+
+
+def test_api_key_falls_back_to_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`.env` supplies API_KEY/INT_SERVER_URL when the env vars are unset.
+
+    `int-cli create` already loads `.env` via `int.config`, so the MCP-backed
+    commands must too -- otherwise one CLI session needs `source .env` for
+    half its subcommands and not the other half.
+    """
+    from int_cli import client as cli_client
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("API_KEY=from-dotenv\nINT_SERVER_URL=http://from-dotenv:8000/mcp\n")
+    monkeypatch.setattr(cli_client, "ENV_FILE", str(env_file))
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.delenv("INT_SERVER_URL", raising=False)
+
+    url, key = cli_client.resolve_config()
+    assert key == "from-dotenv"
+    assert url == "http://from-dotenv:8000/mcp"
+
+
+def test_env_var_beats_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real environment variable still outranks the `.env` file."""
+    from int_cli import client as cli_client
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("API_KEY=from-dotenv\n")
+    monkeypatch.setattr(cli_client, "ENV_FILE", str(env_file))
+    monkeypatch.setenv("API_KEY", "from-env")
+
+    _, key = cli_client.resolve_config()
+    assert key == "from-env"
 
 
 # ===========================================================================

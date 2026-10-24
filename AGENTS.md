@@ -33,6 +33,8 @@ uv run mypy int                                     # typecheck
 uv run int-cli <command> --project <p> ...          # CLI inspection + create (project creation)
 ```
 
+**Host-run caveat** (dev/ops CLI from the repo root, not in a container): `.env` sets `QDRANT_URL=http://qdrant:6333`, a compose-network hostname that does not resolve on the host, so prefix the direct-Qdrant subcommands (`create`/`copy`/`purge`/`export`/`import`) with the override — `QDRANT_URL=http://localhost:6333 uv run int-cli ...`. The MCP-backed subcommands (`add`/`delete`/`search`/`list`/`get`) need only `API_KEY`, which both halves of the CLI read through `int/config.py` (env var first, then `.env`), so no `source .env` is required.
+
 Note: `int-cli create --project <p>` is the only way to materialize a new project. The MCP `add`/`search`/`list` tools reject unknown project names with `Project 'X' does not exist.` (plus a `Did you mean 'Y'?` hint). An assistant working in a project that has no memories yet must run `int-cli create` first before any `int_add`/`int_search`/`int_list`.
 
 Gate: `uv run ruff check && uv run mypy int && uv run pytest` must all pass before any commit.
@@ -42,7 +44,7 @@ Gate: `uv run ruff check && uv run mypy int && uv run pytest` must all pass befo
 1. **Search memory first.** Before running redundant file reads, glob/grep sweeps, or multi-step discovery, call `search` for the project. If a prior session already synthesized what you're about to discover, recall it instead of re-discovering.
 2. **Save when the cost to re-discover exceeds the cost to save.** A 20-tool-call tech-stack synthesis is worth saving. A single file path lookup is not. Store memory via `add` with a `type` tag (`architecture` / `preference` / `command` / `learned-pattern` / `conversation` / `error-solution` / `project-config`). Memories are immutable-append; "edit" = `delete` + `add`.
 
-These are policies for the assistant using `int`, not for the server's code. (Tool names are bare — `add`, `search`, `list`, `delete` — and the MCP server's name `int` namespaces them; MCP clients like OpenCode expose them as `int_add`, `int_search`, etc.)
+These are policies for the assistant using `int`, not for the server's code. (Tool names are bare — `add`, `search`, `list`, `delete` — and the MCP server's name `int` namespaces them; clients expose them per their own convention — OpenCode's Code Mode exposes them only inside its `execute` tool as `tools.int.add`, `tools.int.search`, etc., with no top-level equivalent.)
 
 ## Conventions
 
