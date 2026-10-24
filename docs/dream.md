@@ -48,9 +48,11 @@ was watching for this after `e5ced64e` was saved.
 
 ## Tool surface
 
-Same four `int` tools as everywhere else — `add`, `delete`, `search`, `list`. This
-workflow leans hardest on `list` (full inventory) and `search` (cluster discovery),
-and its entire output is `delete`/`add` pairs.
+Same five `int` tools as everywhere else — `add`, `delete`, `search`, `list`, `get`.
+This workflow leans hardest on `list` (full inventory) and `search` (cluster
+discovery); its entire output is `delete`/`add` pairs, and `get` fetches a memory by
+UUID without an embedding call or scoring noise — useful in the resolution procedure
+(steps 1 and 2) to pull a contradiction's full content deterministically.
 
 ## Workflow
 
@@ -79,9 +81,11 @@ likely to have been superseded by a later, more careful read of the same code.
 
 **Resolution procedure**, once a contradiction is found:
 
-1. Determine which is actually correct. Prefer the one with more specific evidence
-   (exact behavior traced to a function, not just a general claim) or, if you can,
-   verify against the live source with a quick read.
+1. `get` both UUIDs to read each entry's full content — `search` returns content by
+   similarity score, which can reorder or truncate it; `get` gives you the exact
+   claims to compare. Determine which is actually correct. Prefer the one with more
+   specific evidence (exact behavior traced to a function, not just a general claim)
+   or, if you can, verify against the live source with a quick read.
 2. If verification is possible and cheap, do it — don't resolve a contradiction on
    recency alone. A newer memory being wrong is exactly how you'd get a *third*,
    still-wrong entry in the store.

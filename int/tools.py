@@ -16,11 +16,16 @@ Per spec (docs/spec.md):
                                        no embedding call)
 - get(memory_id)                     -> Memory | None (no embedding call)
 
+The descriptions below are the primary steering surface for model
+tool-choice: each states WHEN to use the tool — `search` carries a strong
+call-me-first directive — not just what it does. Keep that when editing.
+
 Tool names are bare (no `int.` prefix). The MCP server is registered under
 the server name `int` at the MCP layer, which already namespaces the tools
-for clients (e.g. OpenCode exposes them as `int_add`, `int_search`,
-`int_list`, `int_delete`). Re-prefixing the server-side tool names with
-`int.` caused OpenCode to render `int_int_add`; bare names are the fix.
+for clients. OpenCode's Code Mode exposes them ONLY inside its `execute`
+sandbox tool as tools.int.add, tools.int.search, ...; there is no top-level
+int_* tool. Re-prefixing the server-side tool names with `int.` caused
+OpenCode to render `int_int_add`; bare names are the fix.
 
 Validation: empty / malformed / missing-required inputs raise our own
 int.models.ValidationError (distinct from pydantic's), so int.server can map
@@ -56,6 +61,7 @@ class _StoreLike(Protocol):
         *,
         query_vector: Sequence[float],
         limit: int = 5,
+        query_text: str | None = None,
     ) -> builtins.list[SearchResult]: ...
     def list(self, project: str) -> builtins.list[MemoryMetadata]: ...  # noqa: A003
     def get(self, memory_id: UUID) -> Memory | None: ...
@@ -122,14 +128,20 @@ class ToolsRegistry:
 
     def list_tools(self) -> builtins.list[ToolDescriptor]:
         return [
-ToolDescriptor(
+            ToolDescriptor(
                 name="add",
                 description=(
-                    "Store a memory in a project. The content is embedded "
-                    "(RETRIEVAL_DOCUMENT task_type) and persisted to the project's "
-                    "memory store. The summary is a one-line brief summary "
-                    "(120 chars max) written by the assistant for quick scanning "
-                    "in list views. Returns the new memory's UUID."
+                    "Persist a learning for future sessions. Call when the "
+                    "cost to re-discover exceeds the cost to save: multi-step "
+                    "findings, architecture facts, config decisions, bug "
+                    "diagnoses, error-solution pairs (include exact file:line "
+                    "locators), and negative facts (something conspicuously "
+                    "absent). Content is embedded (RETRIEVAL_DOCUMENT task_type) "
+                    "and persisted to the project's memory store. Returns the "
+                    "new memory's UUID. Memories are immutable-append; to "
+                    "correct one, delete then re-add with the fixed content. "
+                    "In OpenCode Code Mode, callable only inside the execute "
+                    "tool as tools.int.add — there is no top-level int.add."
                 ),
                 input_schema={
                     "type": "object",
@@ -149,8 +161,9 @@ ToolDescriptor(
                         "summary": {
                             "type": "string",
                             "description": (
-                                "Optional one-line summary written by the assistant "
-                                "for quick scanning in list views."
+                                "Optional one-line summary, 120 chars max, "
+                                "written by the assistant for quick scanning "
+                                "in list views."
                             ),
                         },
                     },
@@ -159,8 +172,12 @@ ToolDescriptor(
             ToolDescriptor(
                 name="delete",
                 description=(
-                    "Delete a memory by ID. Idempotent: returns False if no memory "
-                    "existed at that ID."
+                    "Delete a memory by ID. Idempotent: returns False if no "
+                    "memory existed at that ID. Memories are immutable-append: "
+                    "to correct or update a memory, delete it and add the fixed "
+                    "content back. In OpenCode Code Mode, callable only inside "
+                    "the execute tool as tools.int.delete — there is no "
+                    "top-level int.delete."
                 ),
                 input_schema={
                     "type": "object",
@@ -173,8 +190,20 @@ ToolDescriptor(
             ToolDescriptor(
                 name="search",
                 description=(
-                    "Search a project's memories by semantic query. Returns ranked "
-                    "results (cosine similarity, descending) with content + score."
+                    "Recall what prior sessions already learned. Call this "
+                    "FIRST — before grep, glob, read, bash, web search, or any "
+                    "exploration tool — for any 'how does X work', 'where is Y', "
+                    "'why does Z behave', 'does it support W' question about "
+                    "this project: a previous session may already have "
+                    "synthesized the answer (architecture, config, bugs, past "
+                    "fixes, negative facts). Cheap: one round-trip. Returns "
+                    "ranked memories with content + score (hybrid: semantic "
+                    "similarity blended with keyword coverage, descending — "
+                    "rephrase with the memory's likely content vocabulary if "
+                    "the first query misses). Empty results mean fall through "
+                    "to file tools. In OpenCode Code Mode, callable only inside "
+                    "the execute tool as tools.int.search — there is no "
+                    "top-level int.search."
                 ),
                 input_schema={
                     "type": "object",
@@ -189,8 +218,16 @@ ToolDescriptor(
             ToolDescriptor(
                 name="list",
                 description=(
-                    "List all memories in a project. Metadata only (id, type, "
-                    "created_at); no content, no embedding call."
+                    "Orientation and recency scan of a project's memory. "
+                    "Returns all metadata (id, type, summary, created_at), "
+                    "newest first — no content, no embedding call, cheap. Use "
+                    "before deeper work, AND as the fallback when a question "
+                    "references dates or when semantic search may have missed "
+                    "('what did we do last week', 'on the 16th'): scan "
+                    "created_at to find memories by when they were written, "
+                    "then fetch full content with get by id. In OpenCode "
+                    "Code Mode, callable only inside the execute tool as "
+                    "tools.int.list — there is no top-level int.list."
                 ),
                 input_schema={
                     "type": "object",
@@ -203,7 +240,11 @@ ToolDescriptor(
             ToolDescriptor(
                 name="get",
                 description=(
-                    "Get a single memory by ID with full content. No embedding call."
+                    "Get a single memory by ID with full content. No embedding "
+                    "call. Use after search or list when metadata alone is not "
+                    "enough. In OpenCode Code Mode, callable only inside the "
+                    "execute tool as tools.int.get — there is no top-level "
+                    "int.get."
                 ),
                 input_schema={
                     "type": "object",
@@ -244,9 +285,7 @@ ToolDescriptor(
             return
         hint = difflib.get_close_matches(project, known, n=1, cutoff=0.6)
         if hint:
-            raise ValidationError(
-                f"Project {project!r} does not exist. Did you mean {hint[0]!r}?"
-            )
+            raise ValidationError(f"Project {project!r} does not exist. Did you mean {hint[0]!r}?")
         raise ValidationError(f"Project {project!r} does not exist.")
 
     async def _add(self, args: dict[str, Any]) -> str:
@@ -284,7 +323,11 @@ ToolDescriptor(
     async def _list(self, args: dict[str, Any]) -> builtins.list[MemoryMetadata]:
         project = _require_str(args.get("project"), field="project")
         self._require_project_exists(project)
-        return builtins.list(self._store.list(project))
+        metas = builtins.list(self._store.list(project))
+        # Newest first: recency scanning is list's second use case (see the
+        # description) and raw scroll order is id-based, not time-based.
+        metas.sort(key=lambda m: m.created_at, reverse=True)
+        return metas
 
     async def _get(self, args: dict[str, Any]) -> Memory | None:
         memory_id = _require_uuid_str(args.get("memory_id"), field="memory_id")
@@ -309,7 +352,9 @@ ToolDescriptor(
             q_vec = await query_method(query)
             if not q_vec:
                 raise EmbeddingError("empty embedding for query")
-        return builtins.list(store_search_method(project, query_vector=q_vec, limit=limit))
+        return builtins.list(
+            store_search_method(project, query_vector=q_vec, limit=limit, query_text=query)
+        )
 
     # Dispatch table built lazily after methods are defined.
     _dispatch: dict[str, Callable[[ToolsRegistry, dict[str, Any]], Awaitable[Any]]] = {}

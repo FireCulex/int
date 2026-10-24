@@ -15,6 +15,7 @@ Collection lifecycle (see `ensure_collection`):
 from __future__ import annotations
 
 import builtins
+import re
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Protocol
@@ -65,6 +66,86 @@ def _project_filter(project: str) -> dict[str, Any]:
             {"key": "project", "match": {"value": project}},
         ],
     }
+
+
+# Hybrid search: lexical coverage is blended into the cosine score so queries
+# whose words appear verbatim in a memory can surface even when the embedding
+# ranks it low (observed 2026-09-22: "anchor scorer LOFO re-run" ranked a
+# matching memory #1 while the user's actual phrasing missed it entirely).
+# 0.3 keeps cosine dominant: full lexical coverage can lift a memory roughly a
+# third of the score range -- enough to crack the top-k without drowning out
+# genuine semantic matches.
+_LEXICAL_WEIGHT = 0.3
+
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "but",
+        "by",
+        "did",
+        "do",
+        "does",
+        "for",
+        "from",
+        "had",
+        "has",
+        "have",
+        "how",
+        "i",
+        "in",
+        "is",
+        "it",
+        "its",
+        "no",
+        "not",
+        "of",
+        "on",
+        "or",
+        "our",
+        "so",
+        "that",
+        "the",
+        "their",
+        "them",
+        "there",
+        "these",
+        "they",
+        "this",
+        "to",
+        "us",
+        "was",
+        "we",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "will",
+        "with",
+        "you",
+        "your",
+    }
+)
+
+
+def _tokens(text: str) -> set[str]:
+    """Lowercased alphanumeric tokens, stopwords dropped, ordinals normalized.
+
+    "the 16th" -> {"16"} so date references match content like "Sep 16".
+    """
+    out: set[str] = set()
+    for tok in re.findall(r"[a-z0-9]+", text.lower()):
+        m = re.fullmatch(r"(\d+)(?:st|nd|rd|th)", tok)
+        out.add(m.group(1) if m else tok)
+    return out - _STOPWORDS
 
 
 class QdrantStore:
@@ -240,9 +321,7 @@ class QdrantStore:
         for memory, vector in items:
             new_id = uuid4()
             created_at = (
-                memory.created_at.isoformat()
-                if preserve_timestamps
-                else datetime.now().isoformat()
+                memory.created_at.isoformat() if preserve_timestamps else datetime.now().isoformat()
             )
             payload = {
                 "project": target_project,
@@ -250,11 +329,13 @@ class QdrantStore:
                 "content": memory.content,
                 "created_at": created_at,
             }
-            points.append({
-                "id": new_id,
-                "vector": vector,
-                "payload": payload,
-            })
+            points.append(
+                {
+                    "id": new_id,
+                    "vector": vector,
+                    "payload": payload,
+                }
+            )
 
         # Batch upsert
         try:
@@ -304,9 +385,16 @@ class QdrantStore:
         *,
         query_vector: Sequence[float],
         limit: int = 5,
+        query_text: str | None = None,
     ) -> list_alias[SearchResult]:
-        """Cosine search filtered to one project, ranked by descending score."""
-        return self._do_search(project, query_vector=query_vector, limit=limit)
+        """Hybrid search: cosine similarity blended with lexical coverage.
+
+        `query_text` (the raw query, when the caller has it) enables the
+        lexical component; without it this is pure cosine, ranked descending.
+        """
+        return self._do_search(
+            project, query_vector=query_vector, limit=limit, query_text=query_text
+        )
 
     def list(self, project: str) -> list_alias[MemoryMetadata]:
         """All memory metadata in a project. No content, no embedding call."""
@@ -443,6 +531,7 @@ class QdrantStore:
         *,
         query_vector: Sequence[float],
         limit: int,
+        query_text: str | None = None,
     ) -> list_alias[SearchResult]:
 
         self.ensure_collection()
@@ -473,6 +562,8 @@ class QdrantStore:
             raise EmbeddingError("zero-norm query vector")
         q = q / qn
 
+        q_tokens = _tokens(query_text) if query_text else set()
+
         scored: list[SearchResult] = []
         for point in items:
             v = np.asarray(point.vector, dtype=np.float32)
@@ -480,8 +571,14 @@ class QdrantStore:
             if vn == 0.0:
                 continue
             v_norm = v / vn
-            score = float(np.dot(q, v_norm))
             payload = point.payload
+            cosine = float(np.dot(q, v_norm))
+            if q_tokens:
+                doc_tokens = _tokens(payload["content"]) | _tokens(payload.get("summary") or "")
+                lexical = len(q_tokens & doc_tokens) / len(q_tokens)
+                score = (1.0 - _LEXICAL_WEIGHT) * cosine + _LEXICAL_WEIGHT * lexical
+            else:
+                score = cosine
             scored.append(
                 SearchResult(
                     id=_to_uuid(point.id),

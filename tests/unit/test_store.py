@@ -443,6 +443,73 @@ def test_score_reported_is_cosine_similarity() -> None:
     assert results[0].score == pytest.approx(expected, abs=1e-5)
 
 
+def test_search_without_query_text_is_pure_cosine() -> None:
+    """No query_text -> identical scores to the pre-hybrid behavior."""
+    from int.models import Memory
+
+    store, _ = _make_store(dim=4)
+    stored_vec = [1.0, 1.0, 0.0, 0.0]
+    store.add(Memory(project="p", type="t", content="x"), stored_vec)
+    results = store.search("p", query_vector=[1.0, 0.0, 0.0, 0.0], limit=5)
+    assert results[0].score == pytest.approx(_cos(stored_vec, [1.0, 0.0, 0.0, 0.0]), abs=1e-5)
+
+
+def test_search_hybrid_blends_lexical_coverage_into_score() -> None:
+    """Equal cosine, unequal lexical: the doc containing the query's words
+    must rank first. This is the retrieval-side fix for queries whose words
+    appear verbatim in a memory while the embedding ranks it low."""
+    from int.models import Memory
+
+    store, _ = _make_store(dim=4)
+    store.add(
+        Memory(project="p", type="t", content="learned anchor scorer LOFO re-run"),
+        [1.0, 0.0, 0.0, 0.0],
+    )
+    store.add(
+        Memory(project="p", type="t", content="unrelated prose entirely"),
+        [1.0, 0.0, 0.0, 0.0],
+    )
+    results = store.search(
+        "p",
+        query_vector=[1.0, 0.0, 0.0, 0.0],
+        limit=5,
+        query_text="anchor scorer LOFO re-run",
+    )
+    assert results[0].content == "learned anchor scorer LOFO re-run"
+    assert results[0].score > results[1].score
+    # Matching doc: 0.7 * 1.0 + 0.3 * 1.0; non-matching: 0.7 * 1.0 + 0.3 * 0.0.
+    assert results[0].score == pytest.approx(1.0, abs=1e-5)
+    assert results[1].score == pytest.approx(0.7, abs=1e-5)
+
+
+def test_search_hybrid_matches_date_ordinals() -> None:
+    """'16th' normalizes to '16', so a date-referencing query lexically hits
+    a memory that writes the date as 'Sep 16'."""
+    from int.models import Memory
+
+    store, _ = _make_store(dim=4)
+    store.add(
+        Memory(project="p", type="t", content="re-run happened Sep 16 2026"),
+        [1.0, 0.0, 0.0, 0.0],
+    )
+    store.add(
+        Memory(project="p", type="t", content="totally different topic"),
+        [1.0, 0.0, 0.0, 0.0],
+    )
+    results = store.search("p", query_vector=[1.0, 0.0, 0.0, 0.0], limit=5, query_text="the 16th")
+    assert results[0].content == "re-run happened Sep 16 2026"
+    # 0.7 * cos + 0.3 * (1/1 query tokens covered: {"16"}).
+    assert results[0].score == pytest.approx(1.0, abs=1e-5)
+
+
+def test_tokens_normalizes_ordinals_and_drops_stopwords() -> None:
+    from int.store import _tokens
+
+    assert _tokens("The 16th of September") == {"16", "september"}
+    assert _tokens("1st place, 2nd row") == {"1", "2", "place", "row"}
+    assert _tokens("v1.16 release notes") == {"v1", "16", "release", "notes"}
+
+
 # --- project_names ---
 
 
@@ -488,7 +555,9 @@ def test_get_returns_memory_with_content() -> None:
     from int.models import Memory
 
     store, _ = _make_store(dim=4)
-    mid1 = store.add(Memory(project="p", type="t1", content="c1", summary="first"), [1.0, 0.0, 0.0, 0.0])
+    mid1 = store.add(
+        Memory(project="p", type="t1", content="c1", summary="first"), [1.0, 0.0, 0.0, 0.0]
+    )
     store.add(Memory(project="p", type="t2", content="c2", summary="second"), [1.0, 0.0, 0.0, 0.0])
 
     result = store.get(mid1)
@@ -518,8 +587,12 @@ def test_get_all_returns_memories_with_content() -> None:
     from int.models import Memory
 
     store, _ = _make_store(dim=4)
-    mid1 = store.add(Memory(project="p", type="t1", content="c1", summary="first"), [1.0, 0.0, 0.0, 0.0])
-    mid2 = store.add(Memory(project="p", type="t2", content="c2", summary="second"), [1.0, 0.0, 0.0, 0.0])
+    mid1 = store.add(
+        Memory(project="p", type="t1", content="c1", summary="first"), [1.0, 0.0, 0.0, 0.0]
+    )
+    mid2 = store.add(
+        Memory(project="p", type="t2", content="c2", summary="second"), [1.0, 0.0, 0.0, 0.0]
+    )
 
     memories = store.get_all("p")
 
@@ -539,8 +612,12 @@ def test_get_all_with_vectors_returns_summary() -> None:
     from int.models import Memory
 
     store, _ = _make_store(dim=4)
-    mid1 = store.add(Memory(project="p", type="t1", content="c1", summary="first"), [1.0, 0.0, 0.0, 0.0])
-    mid2 = store.add(Memory(project="p", type="t2", content="c2", summary="second"), [1.0, 0.0, 0.0, 0.0])
+    mid1 = store.add(
+        Memory(project="p", type="t1", content="c1", summary="first"), [1.0, 0.0, 0.0, 0.0]
+    )
+    mid2 = store.add(
+        Memory(project="p", type="t2", content="c2", summary="second"), [1.0, 0.0, 0.0, 0.0]
+    )
 
     results = store.get_all_with_vectors("p")
 

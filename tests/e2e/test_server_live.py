@@ -62,14 +62,27 @@ class _FakeStore:
     def delete(self, memory_id: Any) -> bool:
         return self.memories.pop(memory_id, None) is not None
 
-    def search(self, project: str, *, query_vector: list[float], limit: int = 5) -> list[Any]:
+    def search(
+        self,
+        project: str,
+        *,
+        query_vector: list[float],
+        limit: int = 5,
+        query_text: str | None = None,
+    ) -> list[Any]:
         from datetime import UTC, datetime
         from uuid import uuid4
 
         from int.models import SearchResult
 
         return [
-            SearchResult(id=uuid4(), type="architecture", content="canned", score=0.9, created_at=datetime.now(UTC))
+            SearchResult(
+                id=uuid4(),
+                type="architecture",
+                content="canned",
+                score=0.9,
+                created_at=datetime.now(UTC),
+            )
         ][:limit]
 
     def list(self, project: str) -> list[Any]:  # noqa: A003

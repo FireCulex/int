@@ -31,7 +31,8 @@ class FakeStore:
         self.memories: dict[uuid.UUID, tuple[str, str, str, str | None]] = {}
         self.add_calls: list[tuple[Any, list[float]]] = []
         self.delete_calls: list[uuid.UUID] = []
-        self.search_calls: list[tuple[str, list[float], int]] = []
+        self.search_calls: list[tuple[str, list[float], int, str | None]] = []
+        self.created: dict[uuid.UUID, Any] = {}
         # Projects that already exist (have at least one memory). The
         # existence guard derives from project_names(); pre-seed the names
         # the tests reference so the guard passes for them.
@@ -40,6 +41,7 @@ class FakeStore:
     def add(self, memory: Any, embedding: list[float]) -> uuid.UUID:
         self.add_calls.append((memory, list(embedding)))
         self.memories[memory.id] = (memory.project, memory.type, memory.content, memory.summary)
+        self.created[memory.id] = memory.created_at
         self._known_projects.add(memory.project)
         return memory.id
 
@@ -53,16 +55,29 @@ class FakeStore:
         *,
         query_vector: list[float],
         limit: int = 5,
+        query_text: str | None = None,
     ) -> list[Any]:
-        self.search_calls.append((project, list(query_vector), limit))
+        self.search_calls.append((project, list(query_vector), limit, query_text))
         # Return canned SearchResult-shaped objects for tests asserting shape.
         from datetime import UTC, datetime
 
         from int.models import SearchResult
 
         return [
-            SearchResult(id=uuid.uuid4(), type="architecture", content="canned", score=0.9, created_at=datetime.now(UTC)),
-            SearchResult(id=uuid.uuid4(), type="command", content="canned2", score=0.5, created_at=datetime.now(UTC)),
+            SearchResult(
+                id=uuid.uuid4(),
+                type="architecture",
+                content="canned",
+                score=0.9,
+                created_at=datetime.now(UTC),
+            ),
+            SearchResult(
+                id=uuid.uuid4(),
+                type="command",
+                content="canned2",
+                score=0.5,
+                created_at=datetime.now(UTC),
+            ),
         ][:limit]
 
     def list(self, project: str) -> list[Any]:  # noqa: A003
@@ -75,10 +90,26 @@ class FakeStore:
                 id=mid,
                 type=t,
                 summary=s,
-                created_at=datetime.now(UTC),
+                created_at=self.created.get(mid, datetime.now(UTC)),
             )
             for mid, (p, t, c, s) in self.memories.items()  # noqa: B007
             if p == project
+        ]
+
+    def get_all(self, project: str) -> list[Any]:
+        from int.models import Memory
+
+        return [
+            Memory(
+                id=mid,
+                project=p,
+                type=t,
+                content=c,
+                summary=s,
+                created_at=self.created[mid],
+            )
+            for mid, (p, t, c, s) in self.memories.items()  # noqa: B007
+            if p == project and mid in self.created
         ]
 
     def get(self, memory_id: uuid.UUID) -> Any | None:
@@ -88,7 +119,10 @@ class FakeStore:
         from datetime import UTC, datetime
 
         from int.models import Memory
-        return Memory(id=memory_id, project=p, type=t, content=c, summary=s, created_at=datetime.now(UTC))
+
+        return Memory(
+            id=memory_id, project=p, type=t, content=c, summary=s, created_at=datetime.now(UTC)
+        )
 
     def project_names(self) -> list[str]:
         names = self._known_projects | {p for (p, _, _, _) in self.memories.values()}
@@ -113,9 +147,7 @@ class FakeEmbedder:
         return [1.0] + [0.0] * 767
 
 
-def _make_tools(
-    *, known_projects: list[str] | None = None
-) -> tuple[Any, FakeStore, FakeEmbedder]:
+def _make_tools(*, known_projects: list[str] | None = None) -> tuple[Any, FakeStore, FakeEmbedder]:
     from int.tools import ToolsRegistry
 
     if known_projects is None:
@@ -368,6 +400,14 @@ async def test_search_missing_query_raises_validation_error() -> None:
         await tools.call("search", {"project": "p"})  # type: ignore[call-arg]
 
 
+@pytest.mark.asyncio
+async def test_search_passes_query_text_to_store() -> None:
+    """The raw query reaches the store so hybrid lexical scoring can use it."""
+    tools, store, _ = _make_tools()
+    await tools.call("search", {"project": "p", "query": "anchor scorer"})
+    assert store.search_calls[0][3] == "anchor scorer"
+
+
 # --- list ---
 
 
@@ -426,6 +466,30 @@ async def test_list_missing_project_raises_validation_error() -> None:
     tools, _, _ = _make_tools()
     with pytest.raises(ValidationError):
         await tools.call("list", {})  # type: ignore[call-arg]
+
+
+@pytest.mark.asyncio
+async def test_list_orders_newest_first() -> None:
+    """list is the recency-fallback tool: results must be newest-first, not
+    raw store order. Raw Qdrant scroll order is id-based, so the sort happens
+    at the tools layer."""
+    from datetime import UTC, datetime
+
+    from int.models import Memory
+
+    tools, store, _ = _make_tools()
+    older = Memory(
+        project="p", type="t", content="old", created_at=datetime(2026, 9, 1, tzinfo=UTC)
+    )
+    newer = Memory(
+        project="p", type="t", content="new", created_at=datetime(2026, 9, 22, tzinfo=UTC)
+    )
+    store.add(older, [1.0] * 768)
+    store.add(newer, [1.0] * 768)
+
+    metas = await tools.call("list", {"project": "p"})
+
+    assert [m.id for m in metas] == [newer.id, older.id]
 
 
 # --- get ---

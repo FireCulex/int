@@ -35,7 +35,8 @@ from httpx import ASGITransport, AsyncClient
 class FakeStore:
     def __init__(self, *, known_projects: list[str] | None = None) -> None:
         self.memories: dict[Any, tuple[str, str, str]] = {}
-        self.search_calls: list[tuple[str, list[float], int]] = []
+        self.search_calls: list[tuple[str, list[float], int, str | None]] = []
+        self.created: dict[Any, Any] = {}
         self._known_projects: set[str] = set(known_projects or [])
 
     def ensure_collection(self) -> None:
@@ -43,20 +44,34 @@ class FakeStore:
 
     def add(self, memory: Any, embedding: list[float]) -> Any:
         self.memories[memory.id] = (memory.project, memory.type, memory.content)
+        self.created[memory.id] = memory.created_at
         self._known_projects.add(memory.project)
         return memory.id
 
     def delete(self, memory_id: Any) -> bool:
         return self.memories.pop(memory_id, None) is not None
 
-    def search(self, project: str, *, query_vector: list[float], limit: int = 5) -> list[Any]:
+    def search(
+        self,
+        project: str,
+        *,
+        query_vector: list[float],
+        limit: int = 5,
+        query_text: str | None = None,
+    ) -> list[Any]:
         from datetime import UTC, datetime
 
         from int.models import SearchResult
 
-        self.search_calls.append((project, list(query_vector), limit))
+        self.search_calls.append((project, list(query_vector), limit, query_text))
         return [
-            SearchResult(id=uuid4(), type="architecture", content="canned", score=0.9, created_at=datetime.now(UTC)),
+            SearchResult(
+                id=uuid4(),
+                type="architecture",
+                content="canned",
+                score=0.9,
+                created_at=datetime.now(UTC),
+            ),
         ][:limit]
 
     def list(self, project: str) -> list[Any]:  # noqa: A003
@@ -65,9 +80,28 @@ class FakeStore:
         from int.models import MemoryMetadata
 
         return [
-            MemoryMetadata(id=mid, type=t, created_at=datetime.now(UTC))
+            MemoryMetadata(
+                id=mid,
+                type=t,
+                created_at=self.created.get(mid, datetime.now(UTC)),
+            )
             for mid, (p, t, c) in self.memories.items()  # noqa: B007
             if p == project
+        ]
+
+    def get_all(self, project: str) -> list[Any]:
+        from int.models import Memory
+
+        return [
+            Memory(
+                id=mid,
+                project=p,
+                type=t,
+                content=c,
+                created_at=self.created.get(mid),
+            )
+            for mid, (p, t, c) in self.memories.items()  # noqa: B007
+            if p == project and mid in self.created
         ]
 
     def project_names(self) -> list[str]:
@@ -81,7 +115,14 @@ class FakeStore:
         from datetime import UTC, datetime
 
         from int.models import Memory
-        return Memory(id=memory_id, project=p, type=t, content=c, created_at=datetime.now(UTC))
+
+        return Memory(
+            id=memory_id,
+            project=p,
+            type=t,
+            content=c,
+            created_at=self.created.get(memory_id, datetime.now(UTC)),
+        )
 
 
 class FakeEmbedder:
@@ -373,7 +414,7 @@ async def test_search_tool_integer_limit_reaches_store(
     assert body["result"].get("isError") is False, body
     store = app.state.store
     assert store.search_calls, "search did not reach the store"
-    _, _, limit_seen = store.search_calls[-1]
+    limit_seen = store.search_calls[-1][2]
     assert limit_seen == 3
     assert isinstance(limit_seen, int)
 
@@ -535,3 +576,140 @@ def test_app_state_mask_content_defaults_true(app: Any) -> None:
     app-level state sets the masking flag so handlers can later gate on it."""
     assert hasattr(app, "state")
     assert app.state.mask_content is True
+
+
+# --- REST search route (for non-MCP clients, e.g. the auto-recall plugin) ---
+
+
+@pytest.mark.asyncio
+async def test_rest_search_requires_api_key(app: Any) -> None:
+    """No API_KEY -> 401 AuthError envelope, same as the MCP route."""
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            r = await c.post("/rest/search", json={"project": "pianoweb", "query": "stack"})
+            assert r.status_code == 401
+            assert r.json()["error"] == "AuthError"
+
+
+@pytest.mark.asyncio
+async def test_rest_search_returns_items(client: AsyncClient) -> None:
+    r = await client.post(
+        "/rest/search", json={"project": "pianoweb", "query": "stack", "limit": 2}
+    )
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert len(items) == 1
+    assert items[0]["type"] == "architecture"
+    assert items[0]["content"] == "canned"
+    assert isinstance(items[0]["id"], str)
+
+
+@pytest.mark.asyncio
+async def test_rest_search_unknown_project_is_400(client: AsyncClient) -> None:
+    r = await client.post("/rest/search", json={"project": "nope", "query": "stack"})
+    assert r.status_code == 400
+    assert r.json()["error"] == "ValidationError"
+
+
+@pytest.mark.asyncio
+async def test_rest_search_non_json_body_is_400(client: AsyncClient) -> None:
+    r = await client.post(
+        "/rest/search", content=b"not-json", headers={"content-type": "text/plain"}
+    )
+    assert r.status_code == 400
+    assert r.json()["error"] == "BadRequest"
+
+
+# --- REST list route (recency scan for the auto-recall plugin) ---
+
+
+def _store_with_dated_memories() -> Any:
+    """Two pianoweb memories a week apart, so order assertions are meaningful."""
+    from datetime import UTC, datetime
+
+    from int.models import Memory
+
+    store = FakeStore(known_projects=["pianoweb"])
+    store.add(
+        Memory(
+            project="pianoweb",
+            type="error-solution",
+            content="older finding with plenty of content to snippet",
+            created_at=datetime(2026, 9, 9, 12, 0, tzinfo=UTC),
+        ),
+        [1.0],
+    )
+    store.add(
+        Memory(
+            project="pianoweb",
+            type="architecture",
+            content="newest finding, content should lead the recency list",
+            created_at=datetime(2026, 9, 16, 9, 7, tzinfo=UTC),
+        ),
+        [1.0],
+    )
+    return store
+
+
+@pytest.mark.asyncio
+async def test_rest_list_requires_api_key() -> None:
+    """No API_KEY -> 401 AuthError envelope, same as the MCP and search routes."""
+    app = _build_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            r = await c.post("/rest/list", json={"project": "pianoweb"})
+            assert r.status_code == 401
+            assert r.json()["error"] == "AuthError"
+
+
+@pytest.mark.asyncio
+async def test_rest_list_returns_newest_first_with_snippets() -> None:
+    app = _build_app(store=_store_with_dated_memories())
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"API_KEY": "shared-secret"},
+        ) as c:
+            r = await c.post("/rest/list", json={"project": "pianoweb", "limit": 2})
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert len(items) == 2
+    assert items[0]["snippet"].startswith("newest finding")
+    assert items[1]["snippet"].startswith("older finding")
+    assert items[0]["created_at"] > items[1]["created_at"]
+    assert items[0]["type"] == "architecture"
+    assert isinstance(items[0]["id"], str)
+
+
+@pytest.mark.asyncio
+async def test_rest_list_unknown_project_is_400() -> None:
+    app = _build_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"API_KEY": "shared-secret"},
+        ) as c:
+            r = await c.post("/rest/list", json={"project": "nope"})
+    assert r.status_code == 400
+    assert r.json()["error"] == "ValidationError"
+
+
+@pytest.mark.asyncio
+async def test_rest_list_rejects_bad_limit() -> None:
+    app = _build_app()
+    async with LifespanManager(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"API_KEY": "shared-secret"},
+        ) as c:
+            r = await c.post("/rest/list", json={"project": "pianoweb", "limit": 0})
+    assert r.status_code == 400
+    assert r.json()["error"] == "ValidationError"

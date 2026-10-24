@@ -204,6 +204,7 @@ def _build_mcp_fast(tools: Any, *, store: Any | None = None) -> Any:
                 # Single pydantic model: dump to JSON
                 if hasattr(result, "model_dump_json"):
                     import json as _json
+
                     return _json.dumps(_json.loads(result.model_dump_json()))
                 return str(result)
             except ValidationError as e:
@@ -383,6 +384,98 @@ def build_app(
     @app.get("/healthz")
     async def _healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/rest/search")
+    async def _rest_search(request: Request) -> JSONResponse:
+        """Plain-REST semantic search for non-MCP clients (e.g. the opencode
+        auto-recall plugin, which runs inside opencode's process and cannot
+        speak the MCP Streamable HTTP handshake).
+
+        Same validation and error taxonomy as the MCP `search` tool: unknown
+        projects, backend failures, etc. return typed 4xx/5xx envelopes, never
+        a bare 500. Auth is enforced by the API_KEY middleware above.
+        """
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "BadRequest", "message": "body must be JSON"},
+            )
+        if not isinstance(payload, dict):
+            return JSONResponse(
+                status_code=400,
+                content={"error": "BadRequest", "message": "body must be a JSON object"},
+            )
+        try:
+            results = await app.state.tools.call(
+                "search",
+                {
+                    "project": payload.get("project"),
+                    "query": payload.get("query"),
+                    "limit": payload.get("limit", 3),
+                },
+            )
+        except ValidationError as e:
+            return JSONResponse(
+                status_code=400, content={"error": "ValidationError", "message": str(e)}
+            )
+        except EmbeddingError as e:
+            return JSONResponse(
+                status_code=502, content={"error": "EmbeddingError", "message": str(e)}
+            )
+        except StoreError as e:
+            return JSONResponse(status_code=502, content={"error": "StoreError", "message": str(e)})
+        logger.info("rest search: %d results (metadata only, no content logged)", len(results))
+        return JSONResponse(content={"items": [r.model_dump(mode="json") for r in results]})
+
+    @app.post("/rest/list")
+    async def _rest_list(request: Request) -> JSONResponse:
+        """Plain-REST recency scan for non-MCP clients (the opencode auto-recall
+        plugin): newest-first memory metadata plus a short content snippet per
+        item, so date-referencing questions ("what did we do on the 16th") can
+        be answered against created_at even when semantic search misses.
+
+        Same validation and error taxonomy as the MCP `list` tool (which this
+        delegates to): unknown projects return a typed 4xx envelope, never a
+        bare 500. Auth is enforced by the API_KEY middleware above. Snippets
+        are capped at 160 chars; full content stays behind `get`/MCP search.
+        """
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "BadRequest", "message": "body must be JSON"},
+            )
+        if not isinstance(payload, dict):
+            return JSONResponse(
+                status_code=400,
+                content={"error": "BadRequest", "message": "body must be a JSON object"},
+            )
+        limit = payload.get("limit", 8)
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "ValidationError", "message": "limit must be an integer >= 1"},
+            )
+        try:
+            metas = await app.state.tools.call("list", {"project": payload.get("project")})
+        except ValidationError as e:
+            return JSONResponse(
+                status_code=400, content={"error": "ValidationError", "message": str(e)}
+            )
+        except StoreError as e:
+            return JSONResponse(status_code=502, content={"error": "StoreError", "message": str(e)})
+        by_id = {m.id: m for m in app.state.store.get_all(payload["project"])}
+        items = []
+        for meta in metas[:limit]:
+            item = meta.model_dump(mode="json")
+            memory = by_id.get(meta.id)
+            item["snippet"] = memory.content[:160] if memory is not None else None
+            items.append(item)
+        logger.info("rest list: %d items (metadata + short snippet)", len(items))
+        return JSONResponse(content={"items": items})
 
     app.mount("/mcp", mcp_asgi)
 
